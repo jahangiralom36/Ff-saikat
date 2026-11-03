@@ -1,5 +1,2 @@
-uploads/*
-!uploads/.gitkeep
-!uploads/.htaccess
-.DS_Store
 *.zip
+.DS_Store

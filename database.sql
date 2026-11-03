@@ -1,187 +1,368 @@
 -- ====================================================================
--- Ff Store — database.sql
--- phpMyAdmin → আপনার database select → Import → এই ফাইল দিন। (একবারই)
--- Default admin login:  username: admin   |   password: Admin@12345
--- Login করেই admin panel থেকে password বদলে নিন।
+-- database.sql — সব টেবিল (index.php + admin.php + config.php এর জন্য)
+--
+-- কীভাবে ইম্পোর্ট করবেন:
+--   cPanel → phpMyAdmin → আপনার database সিলেক্ট → Import → এই ফাইল → Go
+--   (একবারই করতে হবে। তারপর config.php তে DB_NAME / DB_USER / DB_PASS বসান।)
+--
+-- অ্যাডমিন ইউজার/পাসওয়ার্ড ডাটাবেজে নেই — config.php (ADMIN_USERNAME / ADMIN_PASSWORD) এ আছে।
+-- সব টেবিলের subdomain_id = 0 (একটাই স্টোর)।
 -- ====================================================================
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
-CREATE TABLE IF NOT EXISTS `settings` (
+-- ---------------------------------------------------------------- settings
+CREATE TABLE IF NOT EXISTS `system_settings` (
   `setting_key`   VARCHAR(100) NOT NULL PRIMARY KEY,
   `setting_value` TEXT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------------------------------------------------------- users
 CREATE TABLE IF NOT EXISTS `users` (
-  `id`            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `username`      VARCHAR(40)  NOT NULL UNIQUE,
-  `email`         VARCHAR(150) NOT NULL UNIQUE,
-  `password_hash` VARCHAR(255) NOT NULL,
-  `balance`       DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  `role`          ENUM('user','admin') NOT NULL DEFAULT 'user',
-  `status`        ENUM('active','suspended') NOT NULL DEFAULT 'active',
-  `last_login_at` DATETIME NULL,
-  `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `id`                     INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`           INT NOT NULL DEFAULT 0,
+  `username`               VARCHAR(100) NOT NULL,
+  `email`                  VARCHAR(191) NULL,
+  `password`               VARCHAR(255) NOT NULL,
+  `firebase_uid`           VARCHAR(128) NULL,
+  `avatar_url`             VARCHAR(255) NULL,
+  `role`                   VARCHAR(20) NOT NULL DEFAULT 'customer',
+  `status`                 VARCHAR(20) NOT NULL DEFAULT 'active',
+  `balance`                DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `profit_balance`         DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `parent_granted_balance` DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `coins`                  INT NOT NULL DEFAULT 0,
+  `discount_percent`       DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `custom_bdt_rate`        DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `can_add_fund`           TINYINT(1) NOT NULL DEFAULT 1,
+  `api_enabled`            TINYINT(1) NOT NULL DEFAULT 1,
+  `allowed_products`       TEXT NULL,
+  `min_deposit`            DECIMAL(10,2) NULL,
+  `max_deposit`            DECIMAL(10,2) NULL,
+  `custom_tutorial_link`   VARCHAR(255) NULL,
+  `referral_code`          VARCHAR(20) NULL,
+  `referred_by`            INT NOT NULL DEFAULT 0,
+  `referral_tokens`        INT NOT NULL DEFAULT 0,
+  `spin_count_available`   INT NOT NULL DEFAULT 0,
+  `spin_spend_total`       DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  `created_by`             INT NOT NULL DEFAULT 0,
+  `created_by_subdomain`   VARCHAR(100) NOT NULL DEFAULT 'main',
+  `created_at`             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_users_sub` (`subdomain_id`),
+  KEY `idx_users_name` (`username`),
+  KEY `idx_users_email` (`email`),
+  KEY `idx_users_ref` (`referral_code`),
+  KEY `idx_users_role` (`role`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `categories` (
-  `id`         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `name`       VARCHAR(60) NOT NULL UNIQUE,
-  `sort_order` INT NOT NULL DEFAULT 0
+-- ---------------------------------------------------------------- catalog
+CREATE TABLE IF NOT EXISTS `product_categories` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `name`         VARCHAR(100) NOT NULL,
+  `sort_order`   INT NOT NULL DEFAULT 0,
+  `is_active`    TINYINT(1) NOT NULL DEFAULT 1,
+  KEY `idx_cat_sub` (`subdomain_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `products` (
-  `id`              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `category_id`     INT UNSIGNED NULL,
-  `name`            VARCHAR(150) NOT NULL,
-  `subtitle`        VARCHAR(150) NULL,
-  `tag`             VARCHAR(30)  NULL,
+  `id`               INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`     INT NOT NULL DEFAULT 0,
+  `name`             VARCHAR(191) NOT NULL,
+  `code`             VARCHAR(100) NULL,
+  `category`         VARCHAR(100) NOT NULL DEFAULT 'APKMOD',
+  `tags`             VARCHAR(255) NULL,
+  `description`      TEXT NULL,
   `image_url`        VARCHAR(255) NULL,
-  `description`     TEXT NULL,
-  `download_link`   VARCHAR(255) NULL,
-  `discount_percent` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
-  `sort_order`      INT NOT NULL DEFAULT 0,
-  `is_pinned`       TINYINT(1) NOT NULL DEFAULT 0,
-  `is_active`       TINYINT(1) NOT NULL DEFAULT 1,
-  `is_maintenance`  TINYINT(1) NOT NULL DEFAULT 0,
-  `maintenance_msg` TEXT NULL,
-  `created_at`      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY `idx_prod_cat` (`category_id`),
+  `logo_url`         VARCHAR(255) NULL,
+  `banner_url`       VARCHAR(255) NULL,
+  `download_link`    VARCHAR(255) NULL,
+  `setup_link`       VARCHAR(255) NULL,
+  `app_download_url` VARCHAR(255) NULL,
+  `km_api_id`        VARCHAR(100) NULL,
+  `sort_order`       INT NOT NULL DEFAULT 0,
+  `is_pinned`        TINYINT(1) NOT NULL DEFAULT 0,
+  `is_active`        TINYINT(1) NOT NULL DEFAULT 1,
+  `is_deleted`       TINYINT(1) NOT NULL DEFAULT 0,
+  `status`           VARCHAR(20) NOT NULL DEFAULT 'active',
+  `is_maintenance`   TINYINT(1) NOT NULL DEFAULT 0,
+  `maintenance_msg`  TEXT NULL,
+  `reset_enabled`    TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at`       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_prod_sub` (`subdomain_id`),
   KEY `idx_prod_state` (`is_active`,`is_maintenance`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `product_plans` (
-  `id`            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `product_id`    INT UNSIGNED NOT NULL,
-  `title`         VARCHAR(100) NOT NULL,
-  `duration_days` INT NOT NULL DEFAULT 1,
-  `price`         DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  `sort_order`    INT NOT NULL DEFAULT 0,
+  `id`                        INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`              INT NOT NULL DEFAULT 0,
+  `product_id`                INT NOT NULL,
+  `plan_title`                VARCHAR(150) NOT NULL,
+  `validity`                  VARCHAR(100) NULL,
+  `duration_days`             INT NOT NULL DEFAULT 1,
+  `duration_unit`             VARCHAR(20) NOT NULL DEFAULT 'days',
+  `duration_value`            INT NOT NULL DEFAULT 1,
+  `price`                     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `regular_price`             DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `user_price`                DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `reseller_price`            DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `discount_percent`          DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `reseller_discount_percent` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `api_plan_id`               INT NOT NULL DEFAULT 0,
+  `reward_coins`              INT NOT NULL DEFAULT 0,
+  `coin_price`                INT NOT NULL DEFAULT 0,
+  `is_active`                 TINYINT(1) NOT NULL DEFAULT 1,
+  `is_deleted`                TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at`                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY `idx_plan_product` (`product_id`),
-  CONSTRAINT `fk_plan_product` FOREIGN KEY (`product_id`) REFERENCES `products`(`id`) ON DELETE CASCADE
+  KEY `idx_plan_sub` (`subdomain_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `stock_keys` (
-  `id`          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `product_id`  INT UNSIGNED NOT NULL,
-  `plan_id`     INT UNSIGNED NOT NULL,
-  `license_key` VARCHAR(255) NOT NULL,
-  `status`      ENUM('available','used') NOT NULL DEFAULT 'available',
-  `created_at`  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `product_id`   INT NOT NULL,
+  `plan_id`      INT NOT NULL,
+  `license_key`  VARCHAR(255) NOT NULL,
+  `status`       ENUM('available','used') NOT NULL DEFAULT 'available',
+  `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY `idx_stock_pick` (`plan_id`,`status`),
-  CONSTRAINT `fk_stock_plan` FOREIGN KEY (`plan_id`) REFERENCES `product_plans`(`id`) ON DELETE CASCADE
+  KEY `idx_stock_sub` (`subdomain_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `orders` (
-  `id`            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `user_id`       INT UNSIGNED NOT NULL,
-  `product_id`    INT UNSIGNED NULL,
-  `plan_id`       INT UNSIGNED NULL,
-  `product_name`  VARCHAR(150) NOT NULL,
-  `plan_title`    VARCHAR(100) NOT NULL,
-  `license_key`   VARCHAR(255) NOT NULL,
-  `price`         DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  `coupon_code`   VARCHAR(40) NULL,
+CREATE TABLE IF NOT EXISTS `user_custom_prices` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id`      INT NOT NULL,
+  `plan_id`      INT NOT NULL,
+  `custom_price` DECIMAL(12,2) NOT NULL,
+  UNIQUE KEY `uq_user_plan` (`user_id`,`plan_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `user_allowed_products` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id`    INT NOT NULL,
+  `product_id` INT NOT NULL,
+  UNIQUE KEY `uq_user_prod` (`user_id`,`product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------- sales
+CREATE TABLE IF NOT EXISTS `licenses` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `user_id`      INT NOT NULL,
+  `product_id`   INT NULL,
+  `plan_id`      INT NULL,
+  `license_key`  VARCHAR(255) NOT NULL,
+  `validity`     VARCHAR(100) NULL,
+  `price`        DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `source`       VARCHAR(50) NOT NULL DEFAULT 'MAIN',
+  `payment_type` VARCHAR(30) NULL,
+  `status`       VARCHAR(20) NOT NULL DEFAULT 'active',
+  `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`   TIMESTAMP NULL DEFAULT NULL,
+  KEY `idx_lic_user` (`user_id`),
+  KEY `idx_lic_sub` (`subdomain_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `transactions` (
+  `id`            INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`  INT NOT NULL DEFAULT 0,
+  `user_id`       INT NOT NULL,
+  `tx_type`       VARCHAR(20) NOT NULL DEFAULT 'deposit',
+  `method`        VARCHAR(50) NOT NULL,
+  `amount`        DECIMAL(12,2) NOT NULL,
+  `bonus_amount`  DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `sender_num`    VARCHAR(100) NULL,
+  `trx_id`        VARCHAR(100) NOT NULL,
+  `order_plan_id` INT NULL,
+  `order_qty`     INT NULL,
+  `order_coupon`  VARCHAR(60) NULL,
+  `status`        ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY `idx_order_user` (`user_id`),
-  CONSTRAINT `fk_order_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+  KEY `idx_trx_user` (`user_id`),
+  KEY `idx_trx_id` (`trx_id`),
+  KEY `idx_trx_sub` (`subdomain_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `gateway_transactions` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `trx_id`       VARCHAR(100) NOT NULL,
+  `method`       VARCHAR(50) NULL,
+  `amount`       DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `user_id`      INT NULL,
+  `status`       VARCHAR(20) NOT NULL DEFAULT 'used',
+  `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_gw_trx` (`trx_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `payment_methods` (
-  `id`          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `name`        VARCHAR(60) NOT NULL,
-  `account_no`  VARCHAR(120) NOT NULL,
-  `account_type` VARCHAR(40) NULL,
-  `instructions` TEXT NULL,
-  `logo_url`    VARCHAR(255) NULL,
-  `is_active`   TINYINT(1) NOT NULL DEFAULT 1,
-  `sort_order`  INT NOT NULL DEFAULT 0
+  `id`             INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`   INT NOT NULL DEFAULT 0,
+  `method_key`     VARCHAR(50) NOT NULL,
+  `name`           VARCHAR(100) NOT NULL,
+  `account_number` VARCHAR(150) NULL,
+  `account_type`   VARCHAR(50) NULL,
+  `instructions`   TEXT NULL,
+  `logo_url`       VARCHAR(255) NULL,
+  `banner_url`     VARCHAR(255) NULL,
+  `qr_image_url`   VARCHAR(255) NULL,
+  `is_active`      TINYINT(1) NOT NULL DEFAULT 1,
+  `allow_add_fund` TINYINT(1) NOT NULL DEFAULT 1,
+  `allow_checkout` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order`     INT NOT NULL DEFAULT 0,
+  KEY `idx_pm_sub` (`subdomain_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `deposits` (
-  `id`          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `user_id`     INT UNSIGNED NOT NULL,
-  `method_name` VARCHAR(60) NOT NULL,
-  `amount`      DECIMAL(12,2) NOT NULL,
-  `sender_no`   VARCHAR(60) NULL,
-  `trx_id`      VARCHAR(100) NOT NULL,
-  `status`      ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
-  `admin_note`  VARCHAR(255) NULL,
-  `created_at`  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `processed_at` DATETIME NULL,
-  UNIQUE KEY `uq_deposit_trx` (`trx_id`),
-  KEY `idx_dep_user` (`user_id`),
-  KEY `idx_dep_status` (`status`),
-  CONSTRAINT `fk_dep_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS `live_purchase_feed` (
+  `id`              INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`    INT NOT NULL DEFAULT 0,
+  `masked_username` VARCHAR(100) NULL,
+  `product_name`    VARCHAR(191) NULL,
+  `amount_bdt`      DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `created_at`      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_feed_sub` (`subdomain_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------------------------------------------------------- marketing
 CREATE TABLE IF NOT EXISTS `coupons` (
-  `id`            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `code`          VARCHAR(40) NOT NULL UNIQUE,
-  `type`          ENUM('percent','fixed') NOT NULL DEFAULT 'percent',
-  `value`         DECIMAL(10,2) NOT NULL,
-  `max_uses`      INT NOT NULL DEFAULT 0,
-  `used_count`    INT NOT NULL DEFAULT 0,
-  `expires_at`    DATETIME NULL,
-  `is_active`     TINYINT(1) NOT NULL DEFAULT 1,
-  `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `id`              INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`    INT NOT NULL DEFAULT 0,
+  `code`            VARCHAR(60) NOT NULL,
+  `title`           VARCHAR(150) NULL,
+  `discount_type`   VARCHAR(20) NOT NULL DEFAULT 'percent',
+  `discount_value`  DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `max_discount`    DECIMAL(12,2) NULL,
+  `min_spend`       DECIMAL(12,2) NULL,
+  `target_type`     VARCHAR(30) NOT NULL DEFAULT 'all',
+  `product_ids`     TEXT NULL,
+  `user_role`       VARCHAR(20) NULL,
+  `max_uses`        INT NOT NULL DEFAULT 0,
+  `per_user_limit`  INT NOT NULL DEFAULT 0,
+  `used_count`      INT NOT NULL DEFAULT 0,
+  `starts_at`       DATETIME NULL,
+  `expires_at`      DATETIME NULL,
+  `expiry_date`     DATETIME NULL,
+  `is_active`       TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at`      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_coupon_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `coupon_usages` (
+  `id`              INT AUTO_INCREMENT PRIMARY KEY,
+  `coupon_id`       INT NOT NULL,
+  `subdomain_id`    INT NOT NULL DEFAULT 0,
+  `user_id`         INT NOT NULL,
+  `product_id`      INT NULL,
+  `discount_bdt`    DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `order_total_bdt` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `created_at`      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_cu_coupon` (`coupon_id`,`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `banners` (
-  `id`         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `image_url`  VARCHAR(255) NOT NULL,
-  `link_url`   VARCHAR(255) NULL,
-  `is_active`  TINYINT(1) NOT NULL DEFAULT 1,
-  `sort_order` INT NOT NULL DEFAULT 0
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `image_url`    VARCHAR(255) NOT NULL,
+  `target_link`  VARCHAR(255) NULL,
+  `title`        VARCHAR(150) NULL,
+  `sort_order`   INT NOT NULL DEFAULT 0,
+  `is_active`    TINYINT(1) NOT NULL DEFAULT 1,
+  `status`       VARCHAR(20) NULL DEFAULT 'active',
+  KEY `idx_banner_sub` (`subdomain_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `announcements` (
-  `id`         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `message`    VARCHAR(255) NOT NULL,
-  `is_active`  TINYINT(1) NOT NULL DEFAULT 1,
-  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS `custom_popups` (
+  `id`                    INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`          INT NOT NULL DEFAULT 0,
+  `title`                 VARCHAR(150) NULL,
+  `message`               TEXT NULL,
+  `image_url`             VARCHAR(255) NULL,
+  `link_url`              VARCHAR(255) NULL,
+  `link_text`             VARCHAR(100) NULL,
+  `show_once_per_session` TINYINT(1) NOT NULL DEFAULT 1,
+  `sort_order`            INT NOT NULL DEFAULT 0,
+  `is_active`             TINYINT(1) NOT NULL DEFAULT 1,
+  KEY `idx_popup_sub` (`subdomain_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `system_notifications` (
+  `id`             INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`   INT NOT NULL DEFAULT 0,
+  `target_type`    VARCHAR(20) NOT NULL DEFAULT 'all',
+  `target_user_id` INT NULL,
+  `title`          VARCHAR(191) NOT NULL,
+  `message`        TEXT NULL,
+  `scope`          VARCHAR(20) NOT NULL DEFAULT 'sub_only',
+  `created_at`     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_notif_sub` (`subdomain_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `referral_settings` (
+  `id`                 INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id`       INT NOT NULL DEFAULT 0,
+  `token_per_referral` INT NOT NULL DEFAULT 10,
+  `referrer_bonus_bdt` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `is_active`          TINYINT(1) NOT NULL DEFAULT 1,
+  UNIQUE KEY `uq_ref_sub` (`subdomain_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `spin_segments` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `title`        VARCHAR(100) NOT NULL,
+  `spend_target` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `bonus_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `probability`  DECIMAL(6,2) NOT NULL DEFAULT 10.00,
+  `color`        VARCHAR(20) NULL,
+  `sort_order`   INT NOT NULL DEFAULT 0,
+  `is_active`    TINYINT(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `user_spin_offers` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `user_id`      INT NOT NULL,
+  `segment_id`   INT NULL,
+  `title`        VARCHAR(100) NULL,
+  `bonus_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `spend_target` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `status`       VARCHAR(20) NOT NULL DEFAULT 'active',
+  `created_at`   DATETIME NULL,
+  `expires_at`   DATETIME NULL,
+  KEY `idx_uso_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `deposit_bonuses` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `title`        VARCHAR(100) NULL,
+  `min_deposit`  DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `bonus_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `bonus_type`   VARCHAR(20) NOT NULL DEFAULT 'fixed',
+  `claim_limit`  INT NOT NULL DEFAULT 0,
+  `sort_order`   INT NOT NULL DEFAULT 0,
+  `is_active`    TINYINT(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `reset_logs` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `subdomain_id` INT NOT NULL DEFAULT 0,
+  `user_id`      INT NOT NULL,
+  `license_key`  VARCHAR(255) NULL,
+  `product_name` VARCHAR(191) NULL,
+  `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_reset_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `activity_logs` (
-  `id`         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `user_id`    INT UNSIGNED NULL,
-  `action`     VARCHAR(60) NOT NULL,
-  `details`    VARCHAR(255) NULL,
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id`    INT NULL,
+  `username`   VARCHAR(100) NULL,
+  `action`     VARCHAR(100) NOT NULL,
+  `details`    TEXT NULL,
   `ip_address` VARCHAR(45) NULL,
-  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY `idx_log_user` (`user_id`)
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;
-
--- ---------------------------------------------------------------- default admin
-INSERT INTO `users` (`username`,`email`,`password_hash`,`role`) VALUES
-('admin','admin@example.com','$2y$10$2m2Ex.sj1tE0KTcxNVqM1eRL6SGLxVgrHxfRgbpvaMrsMvS.boImS','admin')
-ON DUPLICATE KEY UPDATE `role`='admin';
-
--- ---------------------------------------------------------------- default settings (admin → Site Settings থেকে edit হবে)
-INSERT IGNORE INTO `settings` (`setting_key`,`setting_value`) VALUES
-('site_name','Ff Store'),
-('site_tagline','Instant delivery • Trusted • 24/7 support'),
-('currency_symbol','৳'),
-('theme_primary','#2563eb'),
-('theme_accent','#f43f5e'),
-('theme_mode','light'),
-('support_link',''),
-('support_label','Contact Admin Support'),
-('footer_text','© Ff Store. All rights reserved.'),
-('min_deposit','50'),
-('max_deposit','50000'),
-('site_maintenance','0'),
-('site_maintenance_msg','Store upgrade in progress. We will be back shortly.'),
-('maint_ribbon_text','MAINTENANCE'),
-('maint_button_text','MAINTENANCE'),
-('maint_popup_chip','TEMPORARILY UNAVAILABLE'),
-('maint_popup_rules_title','RULES & INFORMATION:'),
-('maint_default_msg','⚠️ Rules & Conditions:\nএই প্রোডাক্টটির সার্ভার আপগ্রেড চলছে। সাময়িক অসুবিধার জন্য আমরা দুঃখিত। খুব শীঘ্রই সার্ভিস চালু করা হবে।'),
-('maint_close_text','CLOSE');
-
--- ---------------------------------------------------------------- starter payment methods (admin → Payment Methods থেকে নিজের নম্বর দিন)
-INSERT INTO `payment_methods` (`name`,`account_no`,`account_type`,`instructions`,`sort_order`) VALUES
-('bKash','01XXXXXXXXX','Personal','Send Money করে Transaction ID দিন।',1),
-('Nagad','01XXXXXXXXX','Personal','Send Money করে Transaction ID দিন।',2);
