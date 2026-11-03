@@ -1,7 +1,7 @@
 <?php
 /**
  * ====================================================================
- * ADMIN PANEL — single store manager (no subdomains, no Telegram bot)
+ * ADMIN PANEL — single store manager
  * VERSION: 15.0 (login from config.php, grouped sidebar, editable maintenance popup)
  * ====================================================================
  */
@@ -146,37 +146,33 @@ if (empty($_SESSION['admin_auth'])) {
     exit;
 }
 
-// Single store context (subdomain_id = 0)
-$subadminTenantId = 0;
-$subadminSlug     = 'main';
-$activeTenant     = [];
 
 // ০% ডিসকাউন্ট ফিক্স: regular_price ০ থাকলে ঠিক করা (শুধু এই স্টোরের প্ল্যান)
 {
     try {
-        $pdo->prepare("UPDATE product_plans SET regular_price = user_price WHERE (regular_price IS NULL OR regular_price <= 0) AND user_price > 0 AND subdomain_id = ?")->execute([$subadminTenantId]);
+        $pdo->prepare("UPDATE product_plans SET regular_price = user_price WHERE (regular_price IS NULL OR regular_price <= 0) AND user_price > 0")->execute([]);
     } catch (Throwable $e) {}
 }
 
 // Auto-seed Payment Methods if completely empty
 try {
-    $chkMethods = (int)$pdo->query("SELECT COUNT(*) FROM payment_methods WHERE subdomain_id = $subadminTenantId")->fetchColumn();
+    $chkMethods = (int)$pdo->query("SELECT COUNT(*) FROM payment_methods ")->fetchColumn();
     if ($chkMethods === 0) {
-        $stmtSeed = $pdo->prepare("INSERT INTO payment_methods (subdomain_id, method_key, name, account_number, account_type, instructions, is_active, allow_add_fund, allow_checkout, sort_order) VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1, ?)");
-        $stmtSeed->execute([$subadminTenantId, 'bkash', 'bKash', (defined('BKASH_NUMBER') ? BKASH_NUMBER : '01700000000'), 'Personal', 'Send Money to the Personal number above, then enter the deposit amount and Transaction ID (TrxID) below to verify instantly.', 1]);
-        $stmtSeed->execute([$subadminTenantId, 'nagad', 'Nagad', (defined('NAGAD_NUMBER') ? NAGAD_NUMBER : '01800000000'), 'Personal', 'Send Money to the Personal number above, then enter the deposit amount and Transaction ID (TrxID) below to verify instantly.', 2]);
-        $stmtSeed->execute([$subadminTenantId, 'rocket', 'Rocket', (defined('ROCKET_NUMBER') ? ROCKET_NUMBER : '01900000000'), 'Personal', 'Send Money to the Personal number above, then enter the deposit amount and Transaction ID (TrxID) below to verify instantly.', 3]);
+        $stmtSeed = $pdo->prepare("INSERT INTO payment_methods (method_key, name, account_number, account_type, instructions, is_active, allow_add_fund, allow_checkout, sort_order) VALUES ( ?, ?, ?, ?, ?, 1, 1, 1, ?)");
+        $stmtSeed->execute([ 'bkash', 'bKash', (defined('BKASH_NUMBER') ? BKASH_NUMBER : '01700000000'), 'Personal', 'Send Money to the Personal number above, then enter the deposit amount and Transaction ID (TrxID) below to verify instantly.', 1]);
+        $stmtSeed->execute(['nagad', 'Nagad', (defined('NAGAD_NUMBER') ? NAGAD_NUMBER : '01800000000'), 'Personal', 'Send Money to the Personal number above, then enter the deposit amount and Transaction ID (TrxID) below to verify instantly.', 2]);
+        $stmtSeed->execute(['rocket', 'Rocket', (defined('ROCKET_NUMBER') ? ROCKET_NUMBER : '01900000000'), 'Personal', 'Send Money to the Personal number above, then enter the deposit amount and Transaction ID (TrxID) below to verify instantly.', 3]);
     }
 } catch (Throwable $e) {}
 
 // ====================================================================
-// FRESH & ISOLATED TENANT SETTINGS
+// STORE SETTINGS
 // ====================================================================
 $settings = [
     'site_name'                    => defined('SITE_NAME') ? SITE_NAME : 'My Store',
-    'site_logo'                    => $activeTenant['site_logo'] ?? '',
-    'loading_logo'                 => $activeTenant['loading_logo'] ?? '',
-    'main_site_theme_color'        => $activeTenant['theme_color'] ?? '#3b82f6',
+    'site_logo'                    => '',
+    'loading_logo'                 => '',
+    'main_site_theme_color'        => '#3b82f6',
     'usdt_rate'                    => '125',
     'inr_rate'                     => '88',
     'binance_market_rate'          => '125',
@@ -185,7 +181,7 @@ $settings = [
     'rocket_number'                => '01900000000',
     'binance_id'                   => '12345678',
     'payment_banner_url'           => '',
-    'app_download_url'             => $activeTenant['apk_url'] ?? '',
+    'app_download_url'             => '',
     'firebase_url'                 => '',
     'auto_payment_on'              => '0',
     'snzpay_api_url'               => 'https://snzpay.digital/api/verify_payment.php',
@@ -200,7 +196,7 @@ $settings = [
     'update_channel_popup_enabled' => '0',
     'update_channel_title'         => 'Join Channel',
     'update_channel_msg'           => '',
-    'update_channel_link'          => $activeTenant['channel_link'] ?? '',
+    'update_channel_link'          => '',
     'spin_wheel_enabled'           => '0',
     'spin_cost'                    => '0.00',
     'spin_daily_limit'             => '5',
@@ -221,7 +217,7 @@ $settings = [
     'firebase_messaging_sender_id' => '',
     'firebase_app_id'              => '',
     'support_telegram'             => defined('SUPPORT_LINK') ? SUPPORT_LINK : '',
-    'support_whatsapp'             => $activeTenant['support_whatsapp'] ?? '',
+    'support_whatsapp'             => '',
     'maintenance_telegram_link'    => '',
     // 🔧 Maintenance card + popup texts
     'maint_ribbon_text'            => 'MAINTENANCE',
@@ -243,18 +239,18 @@ $effectiveInrRate = max(1.0, (float)($settings['inr_rate'] ?? 88.0));
 
 // --- LOAD STORE DATA ---
 
-$stmtR = $pdo->prepare("SELECT * FROM referral_settings WHERE subdomain_id = ? LIMIT 1");
-$stmtR->execute([$subadminTenantId]);
+$stmtR = $pdo->prepare("SELECT * FROM referral_settings  LIMIT 1");
+$stmtR->execute([]);
 $referralConfig = $stmtR->fetch(PDO::FETCH_ASSOC) ?: [
     'token_per_referral' => 10, 'referrer_bonus_bdt' => 0.00, 'is_active' => 1
 ];
 
-$stmtP = $pdo->prepare("SELECT * FROM custom_popups WHERE subdomain_id = ? ORDER BY sort_order ASC, id DESC");
-$stmtP->execute([$subadminTenantId]);
+$stmtP = $pdo->prepare("SELECT * FROM custom_popups  ORDER BY sort_order ASC, id DESC");
+$stmtP->execute([]);
 $customPopupsList = $stmtP->fetchAll(PDO::FETCH_ASSOC);
 
-$stmtC = $pdo->prepare("SELECT * FROM product_categories WHERE subdomain_id = ? ORDER BY sort_order ASC, id ASC");
-$stmtC->execute([$subadminTenantId]);
+$stmtC = $pdo->prepare("SELECT * FROM product_categories  ORDER BY sort_order ASC, id ASC");
+$stmtC->execute([]);
 $productCategoriesList = $stmtC->fetchAll(PDO::FETCH_ASSOC);
 
 // ====================================================================
@@ -273,7 +269,7 @@ if (!function_exists('vpSnzClientName')) {
     }
 }
 
-function subadmin_snzpay_verify_payment(PDO $pdo, int $subId, string $trxId, string $method = 'BKASH', float $amount = 0.0): array {
+function admin_snzpay_verify_payment(PDO $pdo, string $trxId, string $method = 'BKASH', float $amount = 0.0): array {
     global $settings;
 
     $apiUrl = !empty($settings['snzpay_api_url']) ? trim($settings['snzpay_api_url']) : "https://snzpay.digital/api/verify_payment.php";
@@ -335,7 +331,7 @@ function subadmin_snzpay_verify_payment(PDO $pdo, int $subId, string $trxId, str
 // ====================================================================
 // ANTI-FREEZE KEY MANAGER CACHED BALANCE FETCHER 
 // ====================================================================
-function subadmin_km_cached_balance(PDO $pdo, int $subId): string {
+function admin_km_cached_balance(PDO $pdo): string {
     global $settings;
 
     $now = time();
@@ -393,7 +389,7 @@ if (!function_exists('vpIsOrderTrx')) {
     }
 }
 if (!function_exists('vpAdminDeliverOrder')) {
-    function vpAdminDeliverOrder(PDO $pdo, array $trx, int $subId, array $storeSettings, string $sourceLabel): array {
+    function vpAdminDeliverOrder(PDO $pdo, array $trx, array $storeSettings, string $sourceLabel): array {
         $planId = (int)($trx['order_plan_id'] ?? 0);
         $qty    = max(1, min(50, (int)($trx['order_qty'] ?? 1)));
         if ($planId <= 0) return ['ok' => false, 'message' => 'This old order has no plan saved. Use "Credit Wallet" or "Reject".'];
@@ -401,14 +397,14 @@ if (!function_exists('vpAdminDeliverOrder')) {
         $st = $pdo->prepare("SELECT pl.*, p.id AS real_product_id, p.name AS product_name,
                                     COALESCE(NULLIF(pl.plan_title, ''), NULLIF(pl.validity, ''), 'Standard Plan') AS plan_label
                              FROM product_plans pl JOIN products p ON p.id = pl.product_id
-                             WHERE pl.id = ? AND p.subdomain_id = ? LIMIT 1");
-        $st->execute([$planId, $subId]);
+                             WHERE pl.id = ? LIMIT 1");
+        $st->execute([$planId]);
         $plan = $st->fetch(PDO::FETCH_ASSOC);
         if (!$plan) return ['ok' => false, 'message' => 'Ordered plan no longer exists.'];
 
         $keys = []; $stockIds = [];
-        $sk = $pdo->prepare("SELECT id, license_key FROM stock_keys WHERE plan_id = ? AND status = 'available' AND subdomain_id = ? ORDER BY id ASC LIMIT " . (int)$qty);
-        $sk->execute([$planId, $subId]);
+        $sk = $pdo->prepare("SELECT id, license_key FROM stock_keys WHERE plan_id = ? AND status = 'available' ORDER BY id ASC LIMIT " . (int)$qty);
+        $sk->execute([$planId]);
         $rows = $sk->fetchAll(PDO::FETCH_ASSOC);
         if (count($rows) === $qty) {
             $stockIds = array_map('intval', array_column($rows, 'id'));
@@ -445,25 +441,25 @@ if (!function_exists('vpAdminDeliverOrder')) {
         };
         $pdo->beginTransaction();
         try {
-            $up = $pdo->prepare("UPDATE transactions SET status = 'approved' WHERE id = ? AND subdomain_id = ? AND status = 'pending'");
-            $up->execute([(int)$trx['id'], $subId]);
+            $up = $pdo->prepare("UPDATE transactions SET status = 'approved' WHERE id = ? AND status = 'pending'");
+            $up->execute([(int)$trx['id']]);
             if ($up->rowCount() !== 1) { $pdo->rollBack(); $restore(); return ['ok' => false, 'message' => 'This order was already processed.']; }
 
             $fullName  = $plan['product_name'] . ' (' . $plan['plan_label'] . ')';
             $unitPrice = round((float)$trx['amount'] / $qty, 4);
-            $ins = $pdo->prepare("INSERT INTO licenses (user_id, product_id, plan_id, license_key, validity, price, source, payment_type, subdomain_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'direct_pay', ?)");
-            foreach ($keys as $k) $ins->execute([(int)$trx['user_id'], (int)$plan['real_product_id'], $planId, (string)$k, $fullName, $unitPrice, $sourceLabel, $subId]);
+            $ins = $pdo->prepare("INSERT INTO licenses (user_id, product_id, plan_id, license_key, validity, price, source, payment_type) VALUES (?, ?, ?, ?, ?, ?, ?, 'direct_pay')");
+            foreach ($keys as $k) $ins->execute([(int)$trx['user_id'], (int)$plan['real_product_id'], $planId, (string)$k, $fullName, $unitPrice, $sourceLabel]);
 
             $coins = max(0, (int)($plan['reward_coins'] ?? 0)) * $qty;
-            if ($coins > 0) $pdo->prepare("UPDATE users SET coins = coins + ? WHERE id = ? AND subdomain_id = ?")->execute([$coins, (int)$trx['user_id'], $subId]);
+            if ($coins > 0) $pdo->prepare("UPDATE users SET coins = coins + ? WHERE id = ?")->execute([$coins, (int)$trx['user_id']]);
 
             if (!empty($trx['order_coupon'])) {
-                $cp = $pdo->prepare("SELECT id FROM coupons WHERE UPPER(code) = ? AND subdomain_id = ? LIMIT 1");
-                $cp->execute([strtoupper((string)$trx['order_coupon']), $subId]);
+                $cp = $pdo->prepare("SELECT id FROM coupons WHERE UPPER(code) = ? LIMIT 1");
+                $cp->execute([strtoupper((string)$trx['order_coupon'])]);
                 if ($cpId = (int)$cp->fetchColumn()) {
                     $pdo->prepare("UPDATE coupons SET used_count = used_count + 1 WHERE id = ?")->execute([$cpId]);
-                    $pdo->prepare("INSERT INTO coupon_usages (coupon_id, subdomain_id, user_id, product_id, discount_bdt, order_total_bdt) VALUES (?, ?, ?, ?, 0, 0)")
-                        ->execute([$cpId, $subId, (int)$trx['user_id'], (int)$plan['real_product_id']]);
+                    $pdo->prepare("INSERT INTO coupon_usages (coupon_id, user_id, product_id, discount_bdt, order_total_bdt) VALUES (?, ?, ?, 0, 0)")
+                        ->execute([$cpId, (int)$trx['user_id'], (int)$plan['real_product_id']]);
                 }
             }
             $pdo->commit();
@@ -478,18 +474,18 @@ if (!function_exists('vpAdminDeliverOrder')) {
 
 // 🔒 সাব-অ্যাডমিন শুধু নিজের স্টোরের ইউজার পরিবর্তন করতে পারবে
 if (!function_exists('vpSubOwnsUser')) {
-    function vpSubOwnsUser(PDO $pdo, int $userId, int $subId, string $slug): bool {
+    function vpSubOwnsUser(PDO $pdo, int $userId): bool {
         if ($userId <= 0) return false;
-        $st = $pdo->prepare("SELECT 1 FROM users WHERE id = ? AND (subdomain_id = ? OR subdomain_id IS NULL OR created_by_subdomain = ?) LIMIT 1");
-        $st->execute([$userId, $subId, $slug]);
+        $st = $pdo->prepare("SELECT 1 FROM users WHERE id = ? LIMIT 1");
+        $st->execute([$userId]);
         return (bool)$st->fetchColumn();
     }
 }
 
-function syncTenantStackedPricesForUser(PDO $pdo, int $userId, int $subId) {
+function syncStackedPricesForUser(PDO $pdo, int $userId) {
     try {
-        $stmtUser = $pdo->prepare("SELECT id, role, discount_percent FROM users WHERE id = ? AND subdomain_id = ? LIMIT 1");
-        $stmtUser->execute([$userId, $subId]);
+        $stmtUser = $pdo->prepare("SELECT id, role, discount_percent FROM users WHERE id = ? LIMIT 1");
+        $stmtUser->execute([$userId]);
         $u = $stmtUser->fetch(PDO::FETCH_ASSOC);
         if (!$u) return;
 
@@ -499,8 +495,8 @@ function syncTenantStackedPricesForUser(PDO $pdo, int $userId, int $subId) {
         $plansStmt = $pdo->prepare("SELECT pp.id, pp.user_price, pp.reseller_price, pp.regular_price, pp.discount_percent, pp.reseller_discount_percent 
                                     FROM product_plans pp 
                                     JOIN products p ON pp.product_id = p.id 
-                                    WHERE p.subdomain_id = ?");
-        $plansStmt->execute([$subId]);
+                                    ");
+        $plansStmt->execute([]);
         $plans = $plansStmt->fetchAll(PDO::FETCH_ASSOC);
         if (empty($plans)) return;
 
@@ -532,19 +528,19 @@ function syncTenantStackedPricesForUser(PDO $pdo, int $userId, int $subId) {
     } catch (Throwable $e) {}
 }
 
-function syncTenantStackedPricesForAllUsers(PDO $pdo, int $subId, ?string $onlyRole = null) {
+function syncStackedPricesForAllUsers(PDO $pdo, ?string $onlyRole = null) {
     try {
-        $sql = "SELECT id FROM users WHERE subdomain_id = ?";
+        $sql = "SELECT id FROM users WHERE 1=1";
         if ($onlyRole === 'customer') {
             $sql .= " AND (LOWER(TRIM(COALESCE(role, 'customer'))) = 'customer' OR role IS NULL OR role = '')";
         } elseif ($onlyRole === 'reseller') {
             $sql .= " AND LOWER(TRIM(role)) = 'reseller'";
         }
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$subId]);
+        $stmt->execute();
         $uIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
         foreach ($uIds as $uId) {
-            syncTenantStackedPricesForUser($pdo, (int)$uId, $subId);
+            syncStackedPricesForUser($pdo, (int)$uId);
         }
     } catch (Throwable $e) {}
 }
@@ -552,7 +548,7 @@ function syncTenantStackedPricesForAllUsers(PDO $pdo, int $subId, ?string $onlyR
 // ====================================================================
 // KEY MANAGER API HANDLER FOR SUB-ADMIN (FAST TIMEOUT)
 // ====================================================================
-function subadmin_km_request(string $apiUrl, string $apiKey, string $endpoint, array $params = [], string $method = 'POST'): array {
+function admin_km_request(string $apiUrl, string $apiKey, string $endpoint, array $params = [], string $method = 'POST'): array {
     $apiUrl = trim($apiUrl);
     $apiKey = trim($apiKey);
     if (empty($apiUrl) || empty($apiKey)) {
@@ -593,7 +589,7 @@ function subadmin_km_request(string $apiUrl, string $apiKey, string $endpoint, a
     $json = json_decode($res, true);
     if (!is_array($json)) {
         if (strtoupper($method) === 'POST' && $isPhpFile) {
-            return subadmin_km_request($apiUrl, $apiKey, $endpoint, $params, 'GET');
+            return admin_km_request($apiUrl, $apiKey, $endpoint, $params, 'GET');
         }
         return ['status' => 'error', 'message' => 'Invalid Response from Key Manager'];
     }
@@ -605,9 +601,9 @@ function fetchSubadminKmCatalog(array $settings): ?array {
     $kmKey = trim($settings['km_api_key'] ?? '');
     if (empty($kmUrl) || empty($kmKey)) return null;
 
-    $res = subadmin_km_request($kmUrl, $kmKey, 'products', [], 'GET');
+    $res = admin_km_request($kmUrl, $kmKey, 'products', [], 'GET');
     if (empty($res) || (isset($res['status']) && $res['status'] === 'error')) {
-        $res = subadmin_km_request($kmUrl, $kmKey, 'products', [], 'POST');
+        $res = admin_km_request($kmUrl, $kmKey, 'products', [], 'POST');
     }
 
     $raw = $res['products'] ?? ($res['data']['products'] ?? ($res['data'] ?? ($res['items'] ?? [])));
@@ -667,7 +663,7 @@ $toast = null;
 $activeTab = $_POST['active_tab'] ?? 'tab-overview';
 $activeDiscSubTab = $_POST['disc_sub_tab'] ?? 'disc-view-products';
 
-function saveTenantSetting(PDO $pdo, int $subId, string $key, string $val) {
+function saveSetting(PDO $pdo, string $key, string $val) {
     $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?");
     $stmt->execute([$key, $val, $val]);
 }
@@ -686,8 +682,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         // 1 USDT = X BDT  এবং  1 USDT = Y INR — এক জায়গা থেকেই সেট হয়
         $newRate    = max(1.0, (float)($_POST['usdt_rate'] ?? 125));
         $newInrRate = max(1.0, (float)($_POST['inr_rate'] ?? $effectiveInrRate));
-        saveTenantSetting($pdo, $subadminTenantId, 'usdt_rate', (string)$newRate);
-        saveTenantSetting($pdo, $subadminTenantId, 'inr_rate', (string)$newInrRate);
+        saveSetting($pdo, 'usdt_rate', (string)$newRate);
+        saveSetting($pdo, 'inr_rate', (string)$newInrRate);
         $settings['usdt_rate'] = (string)$newRate;
         $settings['inr_rate']  = (string)$newInrRate;
         $effectiveBdtRate = $newRate;
@@ -700,7 +696,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         if (!preg_match('/^#[a-f0-9]{6}$/i', $newColor) && !preg_match('/^#[a-f0-9]{3}$/i', $newColor)) {
             $newColor = '#3b82f6';
         }
-        saveTenantSetting($pdo, $subadminTenantId, 'main_site_theme_color', $newColor);
+        saveSetting($pdo, 'main_site_theme_color', $newColor);
         $settings['main_site_theme_color'] = $newColor;
         $toast = ['type' => 'success', 'msg' => "Store theme color updated!"];
     }
@@ -710,23 +706,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $kmKey = trim($_POST['km_api_key'] ?? '');
 
         if (!empty($kmUrl) && !empty($kmKey)) {
-            saveTenantSetting($pdo, $subadminTenantId, 'km_api_url', $kmUrl);
-            saveTenantSetting($pdo, $subadminTenantId, 'km_api_key', $kmKey);
+            saveSetting($pdo, 'km_api_url', $kmUrl);
+            saveSetting($pdo, 'km_api_key', $kmKey);
             $settings['km_api_url'] = $kmUrl;
             $settings['km_api_key'] = $kmKey;
 
-            $testRes = subadmin_km_request($kmUrl, $kmKey, 'balance');
+            $testRes = admin_km_request($kmUrl, $kmKey, 'balance');
             if (isset($testRes['status']) && $testRes['status'] === 'success') {
                 $bal = number_format((float)($testRes['balance'] ?? 0), 2);
-                saveTenantSetting($pdo, $subadminTenantId, 'km_last_status', 'connected');
-                saveTenantSetting($pdo, $subadminTenantId, 'km_cached_balance', '$' . $bal . ' USD');
-                saveTenantSetting($pdo, $subadminTenantId, 'km_cached_balance_time', (string)time());
+                saveSetting($pdo, 'km_last_status', 'connected');
+                saveSetting($pdo, 'km_cached_balance', '$' . $bal . ' USD');
+                saveSetting($pdo, 'km_cached_balance_time', (string)time());
                 $settings['km_last_status'] = 'connected';
                 $settings['km_cached_balance'] = '$' . $bal . ' USD';
                 $toast = ['type' => 'success', 'msg' => "Connected! Balance: $$bal USD"];
             } else {
                 $errMsg = $testRes['message'] ?? 'Could not authenticate.';
-                saveTenantSetting($pdo, $subadminTenantId, 'km_last_status', 'failed');
+                saveSetting($pdo, 'km_last_status', 'failed');
                 $settings['km_last_status'] = 'failed';
                 $toast = ['type' => 'error', 'msg' => "Connection Failed: $errMsg"];
             }
@@ -736,18 +732,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     }
 
     if ($act === 'test_km_connection') {
-        $testRes = subadmin_km_request($settings['km_api_url'] ?? '', $settings['km_api_key'] ?? '', 'balance');
+        $testRes = admin_km_request($settings['km_api_url'] ?? '', $settings['km_api_key'] ?? '', 'balance');
         if (isset($testRes['status']) && $testRes['status'] === 'success') {
             $bal = number_format((float)($testRes['balance'] ?? 0), 2);
-            saveTenantSetting($pdo, $subadminTenantId, 'km_last_status', 'connected');
-            saveTenantSetting($pdo, $subadminTenantId, 'km_cached_balance', '$' . $bal . ' USD');
-            saveTenantSetting($pdo, $subadminTenantId, 'km_cached_balance_time', (string)time());
+            saveSetting($pdo, 'km_last_status', 'connected');
+            saveSetting($pdo, 'km_cached_balance', '$' . $bal . ' USD');
+            saveSetting($pdo, 'km_cached_balance_time', (string)time());
             $settings['km_last_status'] = 'connected';
             $settings['km_cached_balance'] = '$' . $bal . ' USD';
             $toast = ['type' => 'success', 'msg' => "Operational! Balance: $$bal USD"];
         } else {
             $errMsg = $testRes['message'] ?? 'Connection error.';
-            saveTenantSetting($pdo, $subadminTenantId, 'km_last_status', 'failed');
+            saveSetting($pdo, 'km_last_status', 'failed');
             $settings['km_last_status'] = 'failed';
             $toast = ['type' => 'error', 'msg' => "Failed: $errMsg"];
         }
@@ -764,31 +760,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                     $productName = trim($p['product_name']);
                     $planTitle   = trim($p['plan_title']);
                     $basePrice   = (float)$p['price'];
-                    $code        = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $productName)) . '_sub_' . $subadminTenantId;
+                    $code        = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $productName)) ;
 
-                    $stmtProd = $pdo->prepare("SELECT id FROM products WHERE name = ? AND subdomain_id = ? LIMIT 1");
-                    $stmtProd->execute([$productName, $subadminTenantId]);
+                    $stmtProd = $pdo->prepare("SELECT id FROM products WHERE name = ? LIMIT 1");
+                    $stmtProd->execute([$productName]);
                     $prodId = $stmtProd->fetchColumn();
 
                     if (!$prodId) {
-                        $stmtIns = $pdo->prepare("INSERT INTO products (name, code, sort_order, is_active, category, subdomain_id) VALUES (?, ?, 0, 1, 'APKMOD', ?)");
-                        $stmtIns->execute([$productName, $code, $subadminTenantId]);
+                        $stmtIns = $pdo->prepare("INSERT INTO products (name, code, sort_order, is_active, category) VALUES (?, ?, 0, 1, 'APKMOD')");
+                        $stmtIns->execute([$productName, $code]);
                         $prodId = (int)$pdo->lastInsertId();
                     }
 
-                    $stmtPlan = $pdo->prepare("SELECT id FROM product_plans WHERE api_plan_id = ? AND product_id = ? AND subdomain_id = ? LIMIT 1");
-                    $stmtPlan->execute([$extId, $prodId, $subadminTenantId]);
+                    $stmtPlan = $pdo->prepare("SELECT id FROM product_plans WHERE api_plan_id = ? AND product_id = ? LIMIT 1");
+                    $stmtPlan->execute([$extId, $prodId]);
                     $planExists = $stmtPlan->fetchColumn();
 
                     $resellerPrice = $basePrice;
                     $userPrice     = round($basePrice * 1.25, 2);
 
                     if (!$planExists) {
-                        $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price, subdomain_id) VALUES (?, 30, ?, ?, ?, ?, 0.00, 20.00, ?, 0, 0, ?)");
-                        $stmtPlanIns->execute([$prodId, $planTitle, $resellerPrice, $userPrice, $userPrice, $extId, $subadminTenantId]);
+                        $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, 30, ?, ?, ?, ?, 0.00, 20.00, ?, 0, 0)");
+                        $stmtPlanIns->execute([$prodId, $planTitle, $resellerPrice, $userPrice, $userPrice, $extId]);
                     } else {
-                        $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, reseller_price = ?, user_price = ?, regular_price = ? WHERE id = ? AND subdomain_id = ?");
-                        $stmtPlanUp->execute([$planTitle, $resellerPrice, $userPrice, $userPrice, $planExists, $subadminTenantId]);
+                        $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, reseller_price = ?, user_price = ?, regular_price = ? WHERE id = ?");
+                        $stmtPlanUp->execute([$planTitle, $resellerPrice, $userPrice, $userPrice, $planExists]);
                     }
                     $syncedCount++;
                 }
@@ -820,31 +816,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                         $productName = trim($p['product_name']);
                         $planTitle   = trim($p['plan_title']);
                         $basePrice   = (float)$p['price'];
-                        $code        = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $productName)) . '_sub_' . $subadminTenantId;
+                        $code        = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $productName)) ;
 
-                        $stmtProd = $pdo->prepare("SELECT id FROM products WHERE name = ? AND subdomain_id = ? LIMIT 1");
-                        $stmtProd->execute([$productName, $subadminTenantId]);
+                        $stmtProd = $pdo->prepare("SELECT id FROM products WHERE name = ? LIMIT 1");
+                        $stmtProd->execute([$productName]);
                         $prodId = $stmtProd->fetchColumn();
 
                         if (!$prodId) {
-                            $stmtIns = $pdo->prepare("INSERT INTO products (name, code, sort_order, is_active, category, subdomain_id) VALUES (?, ?, 0, 1, 'APKMOD', ?)");
-                            $stmtIns->execute([$productName, $code, $subadminTenantId]);
+                            $stmtIns = $pdo->prepare("INSERT INTO products (name, code, sort_order, is_active, category) VALUES (?, ?, 0, 1, 'APKMOD')");
+                            $stmtIns->execute([$productName, $code]);
                             $prodId = (int)$pdo->lastInsertId();
                         }
 
-                        $stmtPlan = $pdo->prepare("SELECT id FROM product_plans WHERE api_plan_id = ? AND product_id = ? AND subdomain_id = ? LIMIT 1");
-                        $stmtPlan->execute([$extId, $prodId, $subadminTenantId]);
+                        $stmtPlan = $pdo->prepare("SELECT id FROM product_plans WHERE api_plan_id = ? AND product_id = ? LIMIT 1");
+                        $stmtPlan->execute([$extId, $prodId]);
                         $planExists = $stmtPlan->fetchColumn();
 
                         $resellerPrice = $basePrice;
                         $userPrice     = round($basePrice * 1.25, 2);
 
                         if (!$planExists) {
-                            $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price, subdomain_id) VALUES (?, 30, ?, ?, ?, ?, 0.00, 20.00, ?, 0, 0, ?)");
-                            $stmtPlanIns->execute([$prodId, $planTitle, $resellerPrice, $userPrice, $userPrice, $extId, $subadminTenantId]);
+                            $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, 30, ?, ?, ?, ?, 0.00, 20.00, ?, 0, 0)");
+                            $stmtPlanIns->execute([$prodId, $planTitle, $resellerPrice, $userPrice, $userPrice, $extId]);
                         } else {
-                            $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, reseller_price = ?, user_price = ?, regular_price = ? WHERE id = ? AND subdomain_id = ?");
-                            $stmtPlanUp->execute([$planTitle, $resellerPrice, $userPrice, $userPrice, $planExists, $subadminTenantId]);
+                            $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, reseller_price = ?, user_price = ?, regular_price = ? WHERE id = ?");
+                            $stmtPlanUp->execute([$planTitle, $resellerPrice, $userPrice, $userPrice, $planExists]);
                         }
                         $syncedCount++;
                     }
@@ -862,9 +858,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
     if ($act === 'delete_all_products_confirmed') {
         try {
-            $pdo->prepare("DELETE sk FROM stock_keys sk JOIN products p ON sk.product_id = p.id WHERE p.subdomain_id = ?")->execute([$subadminTenantId]);
-            $pdo->prepare("DELETE pp FROM product_plans pp JOIN products p ON pp.product_id = p.id WHERE p.subdomain_id = ?")->execute([$subadminTenantId]);
-            $pdo->prepare("DELETE FROM products WHERE subdomain_id = ?")->execute([$subadminTenantId]);
+            $pdo->prepare("DELETE sk FROM stock_keys sk JOIN products p ON sk.product_id = p.id ")->execute([]);
+            $pdo->prepare("DELETE pp FROM product_plans pp JOIN products p ON pp.product_id = p.id ")->execute([]);
+            $pdo->prepare("DELETE FROM products ")->execute([]);
             $toast = ['type' => 'success', 'msg' => 'Store catalog purged successfully!'];
         } catch (Throwable $e) {
             $toast = ['type' => 'error', 'msg' => 'Wipe failed: ' . $e->getMessage()];
@@ -881,27 +877,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $isPinned = isset($_POST['is_pinned']) ? 1 : 0;
 
         if (!empty($name)) {
-            $code = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $name)) . '_sub_' . $subadminTenantId;
+            $code = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $name)) ;
             $logoUrl = null;
             $bannerUrl = null;
 
             if (!empty($_FILES['product_logo']['name']) && $_FILES['product_logo']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['product_logo']['name'], PATHINFO_EXTENSION));
-                $fileName = 'prod_logo_' . $subadminTenantId . '_' . time() . '.' . $ext;
+                $fileName = 'prod_logo_' . time() . '.' . $ext;
                 if (move_uploaded_file($_FILES['product_logo']['tmp_name'], $prodUploadDir . $fileName)) {
                     $logoUrl = 'uploads/products/' . $fileName;
                 }
             }
             if (!empty($_FILES['product_banner']['name']) && $_FILES['product_banner']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['product_banner']['name'], PATHINFO_EXTENSION));
-                $fileName = 'prod_banner_' . $subadminTenantId . '_' . time() . '.' . $ext;
+                $fileName = 'prod_banner_' . time() . '.' . $ext;
                 if (move_uploaded_file($_FILES['product_banner']['tmp_name'], $prodUploadDir . $fileName)) {
                     $bannerUrl = 'uploads/products/' . $fileName;
                 }
             }
 
-            $stmt = $pdo->prepare("INSERT INTO products (name, code, category, logo_url, banner_url, image_url, download_link, setup_link, app_download_url, is_active, is_pinned, subdomain_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$name, $code, $category, $logoUrl, $bannerUrl, $bannerUrl, $downloadLink, $setupLink, $appDownloadUrl, $isActive, $isPinned, $subadminTenantId]);
+            $stmt = $pdo->prepare("INSERT INTO products (name, code, category, logo_url, banner_url, image_url, download_link, setup_link, app_download_url, is_active, is_pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$name, $code, $category, $logoUrl, $bannerUrl, $bannerUrl, $downloadLink, $setupLink, $appDownloadUrl, $isActive, $isPinned]);
             $toast = ['type' => 'success', 'msg' => "Product created for your store!"];
         }
     }
@@ -919,45 +915,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $tags = trim($_POST['tags'] ?? '');
         $description = trim($_POST['description'] ?? '');
 
-        $curr = $pdo->query("SELECT * FROM products WHERE id = $prodId AND subdomain_id = $subadminTenantId")->fetch();
+        $curr = $pdo->query("SELECT * FROM products WHERE id = $prodId")->fetch();
         if ($curr) {
             $logoUrl = $curr['logo_url'] ?? null;
             $bannerUrl = $curr['banner_url'] ?? ($curr['image_url'] ?? null);
 
             if (!empty($_FILES['product_logo']['name']) && $_FILES['product_logo']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['product_logo']['name'], PATHINFO_EXTENSION));
-                $fileName = 'prod_logo_' . $subadminTenantId . '_' . time() . '.' . $ext;
+                $fileName = 'prod_logo_' . time() . '.' . $ext;
                 if (move_uploaded_file($_FILES['product_logo']['tmp_name'], $prodUploadDir . $fileName)) {
                     $logoUrl = 'uploads/products/' . $fileName;
                 }
             }
             if (!empty($_FILES['product_banner']['name']) && $_FILES['product_banner']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['product_banner']['name'], PATHINFO_EXTENSION));
-                $fileName = 'prod_banner_' . $subadminTenantId . '_' . time() . '.' . $ext;
+                $fileName = 'prod_banner_' . time() . '.' . $ext;
                 if (move_uploaded_file($_FILES['product_banner']['tmp_name'], $prodUploadDir . $fileName)) {
                     $bannerUrl = 'uploads/products/' . $fileName;
                 }
             }
 
-            $pdo->prepare("UPDATE products SET name = ?, sort_order = ?, image_url = ?, banner_url = ?, logo_url = ?, download_link = ?, setup_link = ?, app_download_url = ?, description = ?, tags = ?, category = ?, is_pinned = ?, is_active = ? WHERE id = ? AND subdomain_id = ?")
-                ->execute([$name, $sortOrder, $bannerUrl, $bannerUrl, $logoUrl, $downloadLink, $setupLink, $appDownloadUrl, $description, $tags, $category, $isPinned, $isActive, $prodId, $subadminTenantId]);
+            $pdo->prepare("UPDATE products SET name = ?, sort_order = ?, image_url = ?, banner_url = ?, logo_url = ?, download_link = ?, setup_link = ?, app_download_url = ?, description = ?, tags = ?, category = ?, is_pinned = ?, is_active = ? WHERE id = ?")
+                ->execute([$name, $sortOrder, $bannerUrl, $bannerUrl, $logoUrl, $downloadLink, $setupLink, $appDownloadUrl, $description, $tags, $category, $isPinned, $isActive, $prodId]);
 
         // 🔧 Maintenance: Online আনচেক = মেইনটেনেন্স (স্টোরে লাল কার্ড + নোটিশ দেখাবে)
         try {
             $maintMsgEdit = trim($_POST['maintenance_msg'] ?? '');
-            $pdo->prepare("UPDATE products SET is_maintenance = ?, maintenance_msg = ? WHERE id = ? AND subdomain_id = ?")
-                ->execute([$isActive ? 0 : 1, $maintMsgEdit !== '' ? $maintMsgEdit : null, $prodId, $subadminTenantId]);
+            $pdo->prepare("UPDATE products SET is_maintenance = ?, maintenance_msg = ? WHERE id = ?")
+                ->execute([$isActive ? 0 : 1, $maintMsgEdit !== '' ? $maintMsgEdit : null, $prodId]);
         } catch (Throwable $e) {}
         // 🔄 Reset permission + Reset API ID
         try {
             if (isset($_POST['reset_form_present'])) {
-                $pdo->prepare("UPDATE products SET reset_enabled = ?, km_api_id = ? WHERE id = ? AND subdomain_id = ?")
-                    ->execute([isset($_POST['reset_enabled']) ? 1 : 0, max(0, (int)($_POST['km_api_id'] ?? 0)), $prodId, $subadminTenantId]);
+                $pdo->prepare("UPDATE products SET reset_enabled = ?, km_api_id = ? WHERE id = ?")
+                    ->execute([isset($_POST['reset_enabled']) ? 1 : 0, max(0, (int)($_POST['km_api_id'] ?? 0)), $prodId]);
             }
         } catch (Throwable $e) {}
 
             if (!empty($_POST['plan_user_price']) && is_array($_POST['plan_user_price'])) {
-                $upPlan = $pdo->prepare("UPDATE product_plans SET user_price = ?, regular_price = ?, reseller_price = ?, reward_coins = ?, coin_price = ? WHERE id = ? AND product_id = ? AND subdomain_id = ?");
+                $upPlan = $pdo->prepare("UPDATE product_plans SET user_price = ?, regular_price = ?, reseller_price = ?, reward_coins = ?, coin_price = ? WHERE id = ? AND product_id = ?");
                 foreach ($_POST['plan_user_price'] as $planId => $uPrice) {
                     $uP = max(0.01, (float)$uPrice);
                     // রিসেলার প্রাইস ফাঁকা/না থাকলে আগের রিসেলার প্রাইস রাখা হবে (আগে প্রতি সেভে Customer এর 80% বসে যেত)
@@ -966,7 +962,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                 else { $stOldR = $pdo->prepare("SELECT reseller_price FROM product_plans WHERE id = ? LIMIT 1"); $stOldR->execute([(int)$planId]); $rP = (float)($stOldR->fetchColumn() ?: 0); }
                     $rCoins = isset($_POST['plan_reward_coins'][$planId]) ? max(0, (int)$_POST['plan_reward_coins'][$planId]) : 0;
                     $cPrice = isset($_POST['plan_coin_price'][$planId]) ? max(0, (int)$_POST['plan_coin_price'][$planId]) : 0;
-                    $upPlan->execute([$uP, $uP, $rP, $rCoins, $cPrice, (int)$planId, $prodId, $subadminTenantId]);
+                    $upPlan->execute([$uP, $uP, $rP, $rCoins, $cPrice, (int)$planId, $prodId]);
                 }
             }
             $toast = ['type' => 'success', 'msg' => 'Product updated successfully!'];
@@ -982,8 +978,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $rewardCoins = max(0, (int)($_POST['reward_coins'] ?? 0));
         $coinPrice = max(0, (int)($_POST['coin_price'] ?? 0));
 
-        $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, api_plan_id, reward_coins, coin_price, subdomain_id) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)")
-            ->execute([$prodId, $title, $rPrice, $uPrice, $uPrice, $apiId, $rewardCoins, $coinPrice, $subadminTenantId]);
+        $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, api_plan_id, reward_coins, coin_price) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$prodId, $title, $rPrice, $uPrice, $uPrice, $apiId, $rewardCoins, $coinPrice]);
         $toast = ['type' => 'success', 'msg' => 'Plan with Coins attached!'];
     }
 
@@ -994,11 +990,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         if ($productId > 0 && $planId > 0 && !empty($rawKeys)) {
             $lines = preg_split('/\r\n|\r|\n/', $rawKeys);
             $inserted = 0;
-            $stmtStock = $pdo->prepare("INSERT INTO stock_keys (product_id, plan_id, license_key, status, subdomain_id) VALUES (?, ?, ?, 'available', ?)");
+            $stmtStock = $pdo->prepare("INSERT INTO stock_keys (product_id, plan_id, license_key, status) VALUES (?, ?, ?, 'available')");
             foreach ($lines as $line) {
                 $cleanKey = trim($line);
                 if (!empty($cleanKey)) {
-                    $stmtStock->execute([$productId, $planId, $cleanKey, $subadminTenantId]);
+                    $stmtStock->execute([$productId, $planId, $cleanKey]);
                     $inserted++;
                 }
             }
@@ -1008,14 +1004,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
     if ($act === 'delete_single_key') {
         $keyId = (int)$_POST['key_id'];
-        $pdo->prepare("DELETE FROM stock_keys WHERE id = ? AND subdomain_id = ?")->execute([$keyId, $subadminTenantId]);
+        $pdo->prepare("DELETE FROM stock_keys WHERE id = ?")->execute([$keyId]);
         $toast = ['type' => 'success', 'msg' => 'Key deleted!'];
     }
 
     // সাব-স্টোর কুপন সেভ
     // 🎟️ COUPON SAVE (CREATE / EDIT) — সময়সীমা, কতজন ব্যবহার করতে পারবে, ইউজার প্রতি লিমিট
     if ($act === 'save_coupon') {
-        $cpScope    = $subadminTenantId;
         $cpId       = (int)($_POST['coupon_id'] ?? 0);
         $code       = strtoupper(preg_replace('/[^A-Za-z0-9_-]/', '', trim($_POST['coupon_code'] ?? '')));
         $discType   = in_array($_POST['discount_type'] ?? '', ['percent', 'fixed'], true) ? $_POST['discount_type'] : 'percent';
@@ -1040,17 +1035,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
             $toast = ['type' => 'error', 'msg' => 'End time must be after start time!'];
         } else {
             try {
-                $dup = $pdo->prepare("SELECT id FROM coupons WHERE UPPER(code) = ? AND subdomain_id = ? AND id != ? LIMIT 1");
-                $dup->execute([$code, $cpScope, $cpId]);
+                $dup = $pdo->prepare("SELECT id FROM coupons WHERE UPPER(code) = ? AND id != ? LIMIT 1");
+                $dup->execute([$code, $cpId]);
                 if ($dup->fetch()) {
                     $toast = ['type' => 'error', 'msg' => "Coupon '$code' already exists!"];
                 } elseif ($cpId > 0) {
-                    $pdo->prepare("UPDATE coupons SET code = ?, title = ?, discount_type = ?, discount_value = ?, max_discount = ?, target_type = ?, product_ids = ?, min_spend = ?, max_uses = ?, per_user_limit = ?, user_role = ?, starts_at = ?, expires_at = ?, expiry_date = ?, is_active = ? WHERE id = ? AND subdomain_id = ?")
-                        ->execute([$code, $title ?: null, $discType, $discVal, $maxDisc, $targetType, $prodIds, $minSpend, $maxUses, $perUser, $userRoleC, $startsAt, $expiresAt, $expiryDate, $isActiveC, $cpId, $cpScope]);
+                    $pdo->prepare("UPDATE coupons SET code = ?, title = ?, discount_type = ?, discount_value = ?, max_discount = ?, target_type = ?, product_ids = ?, min_spend = ?, max_uses = ?, per_user_limit = ?, user_role = ?, starts_at = ?, expires_at = ?, expiry_date = ?, is_active = ? WHERE id = ?")
+                        ->execute([$code, $title ?: null, $discType, $discVal, $maxDisc, $targetType, $prodIds, $minSpend, $maxUses, $perUser, $userRoleC, $startsAt, $expiresAt, $expiryDate, $isActiveC, $cpId]);
                     $toast = ['type' => 'success', 'msg' => "Coupon '$code' updated!"];
                 } else {
-                    $pdo->prepare("INSERT INTO coupons (subdomain_id, code, title, discount_type, discount_value, max_discount, target_type, product_ids, min_spend, max_uses, used_count, per_user_limit, user_role, starts_at, expires_at, expiry_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)")
-                        ->execute([$cpScope, $code, $title ?: null, $discType, $discVal, $maxDisc, $targetType, $prodIds, $minSpend, $maxUses, $perUser, $userRoleC, $startsAt, $expiresAt, $expiryDate, $isActiveC]);
+                    $pdo->prepare("INSERT INTO coupons (code, title, discount_type, discount_value, max_discount, target_type, product_ids, min_spend, max_uses, used_count, per_user_limit, user_role, starts_at, expires_at, expiry_date, is_active) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)")
+                        ->execute([ $code, $title ?: null, $discType, $discVal, $maxDisc, $targetType, $prodIds, $minSpend, $maxUses, $perUser, $userRoleC, $startsAt, $expiresAt, $expiryDate, $isActiveC]);
                     $toast = ['type' => 'success', 'msg' => "Coupon '$code' created!"];
                 }
             } catch (Throwable $e) {
@@ -1062,7 +1057,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     if ($act === 'toggle_coupon') {
         $cpId = (int)($_POST['coupon_id'] ?? 0);
         if ($cpId > 0) {
-            $pdo->prepare("UPDATE coupons SET is_active = IF(is_active = 1, 0, 1) WHERE id = ? AND subdomain_id = ?")->execute([$cpId, $subadminTenantId]);
+            $pdo->prepare("UPDATE coupons SET is_active = IF(is_active = 1, 0, 1) WHERE id = ?")->execute([$cpId]);
             $toast = ['type' => 'success', 'msg' => 'Coupon status changed!'];
         }
     }
@@ -1070,7 +1065,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     if ($act === 'delete_coupon') {
         $cpId = (int)($_POST['coupon_id'] ?? 0);
         if ($cpId > 0) {
-            $pdo->prepare("DELETE FROM coupons WHERE id = ? AND subdomain_id = ?")->execute([$cpId, $subadminTenantId]);
+            $pdo->prepare("DELETE FROM coupons WHERE id = ?")->execute([$cpId]);
             try { $pdo->prepare("DELETE FROM coupon_usages WHERE coupon_id = ?")->execute([$cpId]); } catch (Throwable $e) {}
             $toast = ['type' => 'success', 'msg' => 'Coupon deleted!'];
         }
@@ -1081,7 +1076,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $prodId = (int)($_POST['product_id'] ?? 0);
         $turnOn = ($_POST['reset_state'] ?? '') === '1';
         if ($prodId > 0) {
-            $pdo->prepare("UPDATE products SET reset_enabled = ? WHERE id = ? AND subdomain_id = ?")->execute([$turnOn ? 1 : 0, $prodId, $subadminTenantId]);
+            $pdo->prepare("UPDATE products SET reset_enabled = ? WHERE id = ?")->execute([$turnOn ? 1 : 0, $prodId]);
             $toast = ['type' => 'success', 'msg' => $turnOn ? '🔄 HWID Reset ENABLED for this product' : '⛔ HWID Reset DISABLED for this product'];
         }
     }
@@ -1091,13 +1086,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $userPrices = $_POST['qp_user'] ?? []; $resPrices = $_POST['qp_res'] ?? [];
         $cnt = 0;
         if ($prodId > 0 && is_array($userPrices)) {
-            $upQ = $pdo->prepare("UPDATE product_plans SET user_price = ?, regular_price = ?, reseller_price = ? WHERE id = ? AND product_id = ? AND subdomain_id = ?");
+            $upQ = $pdo->prepare("UPDATE product_plans SET user_price = ?, regular_price = ?, reseller_price = ? WHERE id = ? AND product_id = ?");
             foreach ($userPrices as $plId => $uRaw) {
                 if (!is_numeric($uRaw) || (float)$uRaw <= 0) continue;
                 $uP = round((float)$uRaw, 2);
                 $rRaw = trim((string)($resPrices[$plId] ?? ''));
                 $rP = (is_numeric($rRaw) && (float)$rRaw > 0) ? round((float)$rRaw, 2) : 0.00;
-                $upQ->execute([$uP, $uP, $rP, (int)$plId, $prodId, $subadminTenantId]);
+                $upQ->execute([$uP, $uP, $rP, (int)$plId, $prodId]);
                 $cnt++;
             }
         }
@@ -1110,8 +1105,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $turnOn   = ($_POST['maint_state'] ?? '') === '1';
         $maintMsg = trim($_POST['maintenance_msg'] ?? '');
         if ($prodId > 0) {
-            $pdo->prepare("UPDATE products SET is_maintenance = ?, is_active = ?, maintenance_msg = ? WHERE id = ? AND subdomain_id = ?")
-                ->execute([$turnOn ? 1 : 0, $turnOn ? 0 : 1, $maintMsg !== '' ? $maintMsg : null, $prodId, $subadminTenantId]);
+            $pdo->prepare("UPDATE products SET is_maintenance = ?, is_active = ?, maintenance_msg = ? WHERE id = ?")
+                ->execute([$turnOn ? 1 : 0, $turnOn ? 0 : 1, $maintMsg !== '' ? $maintMsg : null, $prodId]);
             $toast = ['type' => 'success', 'msg' => $turnOn ? '🔧 Product is now in MAINTENANCE (shows red on store)' : '✅ Product is back ONLINE'];
         }
     }
@@ -1121,16 +1116,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $prodId = (int)($_POST['product_id'] ?? 0);
         $maintMsg = trim($_POST['maintenance_msg'] ?? '');
         if ($prodId > 0) {
-            $pdo->prepare("UPDATE products SET maintenance_msg = ? WHERE id = ? AND subdomain_id = ?")->execute([$maintMsg ?: null, $prodId, $subadminTenantId]);
+            $pdo->prepare("UPDATE products SET maintenance_msg = ? WHERE id = ?")->execute([$maintMsg ?: null, $prodId]);
             $toast = ['type' => 'success', 'msg' => 'Product notice updated!'];
         }
     }
 
     if ($act === 'delete_product_entire') {
         $prodId = (int)$_POST['product_id'];
-        $pdo->prepare("DELETE FROM stock_keys WHERE product_id = ? AND subdomain_id = ?")->execute([$prodId, $subadminTenantId]);
-        $pdo->prepare("DELETE FROM product_plans WHERE product_id = ? AND subdomain_id = ?")->execute([$prodId, $subadminTenantId]);
-        $pdo->prepare("DELETE FROM products WHERE id = ? AND subdomain_id = ?")->execute([$prodId, $subadminTenantId]);
+        $pdo->prepare("DELETE FROM stock_keys WHERE product_id = ?")->execute([$prodId]);
+        $pdo->prepare("DELETE FROM product_plans WHERE product_id = ?")->execute([$prodId]);
+        $pdo->prepare("DELETE FROM products WHERE id = ?")->execute([$prodId]);
         $toast = ['type' => 'success', 'msg' => 'Product removed!'];
     }
 
@@ -1143,18 +1138,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
             $plansStmt = $pdo->prepare("SELECT pp.id, pp.regular_price, pp.user_price 
                                         FROM product_plans pp 
                                         JOIN products p ON pp.product_id = p.id 
-                                        WHERE p.subdomain_id = ?");
-            $plansStmt->execute([$subadminTenantId]);
+                                        ");
+            $plansStmt->execute([]);
             $plans = $plansStmt->fetchAll(PDO::FETCH_ASSOC);
 
-            $stmtUp = $pdo->prepare("UPDATE product_plans SET user_price = ?, discount_percent = ? WHERE id = ? AND subdomain_id = ?");
+            $stmtUp = $pdo->prepare("UPDATE product_plans SET user_price = ?, discount_percent = ? WHERE id = ?");
             foreach ($plans as $pl) {
                 $regular = (float)$pl['regular_price'] > 0 ? (float)$pl['regular_price'] : (float)$pl['user_price'];
                 $newPrice = ($discPercent > 0) ? max(0.01, round($regular * (1 - ($discPercent / 100)), 2)) : $regular;
-                $stmtUp->execute([$newPrice, $discPercent, (int)$pl['id'], $subadminTenantId]);
+                $stmtUp->execute([$newPrice, $discPercent, (int)$pl['id']]);
             }
 
-            syncTenantStackedPricesForAllUsers($pdo, $subadminTenantId);
+            syncStackedPricesForAllUsers($pdo);
             $toast = ['type' => 'success', 'msg' => ($discPercent > 0) ? "Applied $discPercent% discount to all products!" : "Product discounts reset to 0%!"];
         } catch (Throwable $e) {
             $toast = ['type' => 'error', 'msg' => 'Error: ' . $e->getMessage()];
@@ -1166,8 +1161,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
             $pdo->prepare("UPDATE product_plans pp 
                            JOIN products p ON pp.product_id = p.id 
                            SET pp.user_price = pp.regular_price, pp.discount_percent = 0.00 
-                           WHERE p.subdomain_id = ? AND pp.regular_price > 0")->execute([$subadminTenantId]);
-            syncTenantStackedPricesForAllUsers($pdo, $subadminTenantId);
+                           WHERE pp.regular_price > 0")->execute([]);
+            syncStackedPricesForAllUsers($pdo);
             $toast = ['type' => 'success', 'msg' => "All product discounts turned off & regular prices restored!"];
         } catch (Throwable $e) {
             $toast = ['type' => 'error', 'msg' => 'Error: ' . $e->getMessage()];
@@ -1179,8 +1174,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $discPercent = max(0.0, min(99.0, (float)($_POST['discount_percent'] ?? 0)));
 
         if ($planId > 0) {
-            $plStmt = $pdo->prepare("SELECT id, regular_price, user_price FROM product_plans WHERE id = ? AND subdomain_id = ?");
-            $plStmt->execute([$planId, $subadminTenantId]);
+            $plStmt = $pdo->prepare("SELECT id, regular_price, user_price FROM product_plans WHERE id = ?");
+            $plStmt->execute([$planId]);
             $pl = $plStmt->fetch(PDO::FETCH_ASSOC);
 
             if ($pl) {
@@ -1188,15 +1183,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                 
                 // নিশ্চিত করা যে regular_price সঠিক মূল্যে সেভ আছে
                 if ((float)$pl['regular_price'] <= 0) {
-                    $pdo->prepare("UPDATE product_plans SET regular_price = ? WHERE id = ? AND subdomain_id = ?")->execute([$regular, $planId, $subadminTenantId]);
+                    $pdo->prepare("UPDATE product_plans SET regular_price = ? WHERE id = ?")->execute([$regular, $planId]);
                 }
 
                 // ০% ডিসকাউন্ট দিলে আসল রেগুলার প্রাইস রিস্টোর করবে
                 $newPrice = ($discPercent > 0) ? max(0.01, round($regular * (1 - ($discPercent / 100)), 2)) : $regular;
-                $pdo->prepare("UPDATE product_plans SET user_price = ?, discount_percent = ? WHERE id = ? AND subdomain_id = ?")
-                    ->execute([$newPrice, $discPercent, $planId, $subadminTenantId]);
+                $pdo->prepare("UPDATE product_plans SET user_price = ?, discount_percent = ? WHERE id = ?")
+                    ->execute([$newPrice, $discPercent, $planId]);
 
-                syncTenantStackedPricesForAllUsers($pdo, $subadminTenantId);
+                syncStackedPricesForAllUsers($pdo);
                 $toast = ['type' => 'success', 'msg' => ($discPercent > 0 ? "Plan discount updated to $discPercent%!" : "Discount reset to 0%! Regular price ($$regular USD) restored.")];
             }
         }
@@ -1208,13 +1203,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
         try {
             if ($targetRole === 'customer') {
-                $stmt = $pdo->prepare("UPDATE users SET discount_percent = ? WHERE subdomain_id = ? AND (LOWER(TRIM(COALESCE(role, 'customer'))) = 'customer' OR role IS NULL OR role = '')");
+                $stmt = $pdo->prepare("UPDATE users SET discount_percent = ? WHERE (LOWER(TRIM(COALESCE(role, 'customer'))) = 'customer' OR role IS NULL OR role = '')");
             } else {
-                $stmt = $pdo->prepare("UPDATE users SET discount_percent = ? WHERE subdomain_id = ? AND LOWER(TRIM(role)) = 'reseller'");
+                $stmt = $pdo->prepare("UPDATE users SET discount_percent = ? WHERE LOWER(TRIM(role)) = 'reseller'");
             }
-            $stmt->execute([$discPercent, $subadminTenantId]);
+            $stmt->execute([$discPercent]);
 
-            syncTenantStackedPricesForAllUsers($pdo, $subadminTenantId, $targetRole);
+            syncStackedPricesForAllUsers($pdo, $targetRole);
             $roleLabel = ucfirst($targetRole);
             $toast = ['type' => 'success', 'msg' => ($discPercent > 0) ? "Applied $discPercent% extra discount to all {$roleLabel}s (Stacked)!" : "Discounts reset to 0% for all {$roleLabel}s!"];
         } catch (Throwable $e) {
@@ -1226,11 +1221,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $targetRole = in_array($_POST['target_role'] ?? '', ['customer', 'reseller']) ? $_POST['target_role'] : 'customer';
         try {
             if ($targetRole === 'customer') {
-                $pdo->prepare("UPDATE users SET discount_percent = 0.00 WHERE subdomain_id = ? AND (LOWER(TRIM(COALESCE(role, 'customer'))) = 'customer' OR role IS NULL OR role = '')")->execute([$subadminTenantId]);
+                $pdo->prepare("UPDATE users SET discount_percent = 0.00 WHERE (LOWER(TRIM(COALESCE(role, 'customer'))) = 'customer' OR role IS NULL OR role = '')")->execute([]);
             } else {
-                $pdo->prepare("UPDATE users SET discount_percent = 0.00 WHERE subdomain_id = ? AND LOWER(TRIM(role)) = 'reseller'")->execute([$subadminTenantId]);
+                $pdo->prepare("UPDATE users SET discount_percent = 0.00 WHERE LOWER(TRIM(role)) = 'reseller'")->execute([]);
             }
-            syncTenantStackedPricesForAllUsers($pdo, $subadminTenantId, $targetRole);
+            syncStackedPricesForAllUsers($pdo, $targetRole);
             $toast = ['type' => 'success', 'msg' => "All {$targetRole} discounts turned off successfully!"];
         } catch (Throwable $e) {
             $toast = ['type' => 'error', 'msg' => 'Error: ' . $e->getMessage()];
@@ -1242,8 +1237,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $discPercent = max(0.0, min(99.0, (float)($_POST['discount_percent'] ?? 0)));
 
         if ($targetUid > 0) {
-            $pdo->prepare("UPDATE users SET discount_percent = ? WHERE id = ? AND subdomain_id = ?")->execute([$discPercent, $targetUid, $subadminTenantId]);
-            syncTenantStackedPricesForUser($pdo, $targetUid, $subadminTenantId);
+            $pdo->prepare("UPDATE users SET discount_percent = ? WHERE id = ?")->execute([$discPercent, $targetUid]);
+            syncStackedPricesForUser($pdo, $targetUid);
             $toast = ['type' => 'success', 'msg' => "User discount set to $discPercent% (Stacked with plan discount)!"];
         }
     }
@@ -1251,8 +1246,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     if ($act === 'reset_single_user_discount') {
         $targetUid = (int)($_POST['target_user_id'] ?? 0);
         if ($targetUid > 0) {
-            $pdo->prepare("UPDATE users SET discount_percent = 0.00 WHERE id = ? AND subdomain_id = ?")->execute([$targetUid, $subadminTenantId]);
-            if (vpSubOwnsUser($pdo, $targetUid, $subadminTenantId, (string)$subadminSlug)) $pdo->prepare("DELETE FROM user_custom_prices WHERE user_id = ?")->execute([$targetUid]);
+            $pdo->prepare("UPDATE users SET discount_percent = 0.00 WHERE id = ?")->execute([$targetUid]);
+            if (vpSubOwnsUser($pdo, $targetUid)) $pdo->prepare("DELETE FROM user_custom_prices WHERE user_id = ?")->execute([$targetUid]);
             $toast = ['type' => 'success', 'msg' => "Discount removed for this user!"];
         }
     }
@@ -1281,8 +1276,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
             $existing = null;
             if ($methodId > 0) {
-                $stmtExt = $pdo->prepare("SELECT * FROM payment_methods WHERE id = ? AND subdomain_id = ? LIMIT 1");
-                $stmtExt->execute([$methodId, $subadminTenantId]);
+                $stmtExt = $pdo->prepare("SELECT * FROM payment_methods WHERE id = ? LIMIT 1");
+                $stmtExt->execute([$methodId]);
                 $existing = $stmtExt->fetch(PDO::FETCH_ASSOC);
             }
 
@@ -1293,7 +1288,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
             if (!empty($_FILES['logo_file']['name']) && $_FILES['logo_file']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['logo_file']['name'], PATHINFO_EXTENSION));
                 if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'svg'])) {
-                    $fileName = 'pm_sub_' . $subadminTenantId . '_logo_' . time() . '.' . $ext;
+                    $fileName = 'pm_logo_' . time() . '.' . $ext;
                     if (move_uploaded_file($_FILES['logo_file']['tmp_name'], $gatewayUploadDir . $fileName)) {
                         $logoUrl = 'uploads/gateways/' . $fileName;
                     }
@@ -1303,7 +1298,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
             if (!empty($_FILES['banner_file']['name']) && $_FILES['banner_file']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['banner_file']['name'], PATHINFO_EXTENSION));
                 if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
-                    $fileName = 'pm_sub_' . $subadminTenantId . '_banner_' . time() . '.' . $ext;
+                    $fileName = 'pm_banner_' . time() . '.' . $ext;
                     if (move_uploaded_file($_FILES['banner_file']['tmp_name'], $gatewayUploadDir . $fileName)) {
                         $bannerUrl = 'uploads/gateways/' . $fileName;
                     }
@@ -1313,7 +1308,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
             if (!empty($_FILES['qr_file']['name']) && $_FILES['qr_file']['error'] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($_FILES['qr_file']['name'], PATHINFO_EXTENSION));
                 if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'svg'])) {
-                    $fileName = 'pm_sub_' . $subadminTenantId . '_qr_' . time() . '.' . $ext;
+                    $fileName = 'pm_qr_' . time() . '.' . $ext;
                     if (move_uploaded_file($_FILES['qr_file']['tmp_name'], $gatewayUploadDir . $fileName)) {
                         $qrUrl = 'uploads/gateways/' . $fileName;
                     }
@@ -1322,12 +1317,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
             try {
                 if ($methodId > 0 && $existing) {
-                    $stmt = $pdo->prepare("UPDATE payment_methods SET name = ?, method_key = ?, account_number = ?, account_type = ?, instructions = ?, logo_url = ?, banner_url = ?, qr_image_url = ?, is_active = ?, allow_add_fund = ?, allow_checkout = ?, sort_order = ? WHERE id = ? AND subdomain_id = ?");
-                    $stmt->execute([$name, $methodKey, $accountNumber, $accountType, $instructions, $logoUrl, $bannerUrl, $qrUrl, $isActive, $allowAddFund, $allowCheckout, $sortOrder, $methodId, $subadminTenantId]);
+                    $stmt = $pdo->prepare("UPDATE payment_methods SET name = ?, method_key = ?, account_number = ?, account_type = ?, instructions = ?, logo_url = ?, banner_url = ?, qr_image_url = ?, is_active = ?, allow_add_fund = ?, allow_checkout = ?, sort_order = ? WHERE id = ?");
+                    $stmt->execute([$name, $methodKey, $accountNumber, $accountType, $instructions, $logoUrl, $bannerUrl, $qrUrl, $isActive, $allowAddFund, $allowCheckout, $sortOrder, $methodId]);
                     $toast = ['type' => 'success', 'msg' => "$name channel updated for your store!"];
                 } else {
-                    $stmt = $pdo->prepare("INSERT INTO payment_methods (subdomain_id, name, method_key, account_number, account_type, instructions, logo_url, banner_url, qr_image_url, is_active, allow_add_fund, allow_checkout, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                    $stmt->execute([$subadminTenantId, $name, $methodKey, $accountNumber, $accountType, $instructions, $logoUrl, $bannerUrl, $qrUrl, $isActive, $allowAddFund, $allowCheckout, $sortOrder]);
+                    $stmt = $pdo->prepare("INSERT INTO payment_methods (name, method_key, account_number, account_type, instructions, logo_url, banner_url, qr_image_url, is_active, allow_add_fund, allow_checkout, sort_order) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    $stmt->execute([ $name, $methodKey, $accountNumber, $accountType, $instructions, $logoUrl, $bannerUrl, $qrUrl, $isActive, $allowAddFund, $allowCheckout, $sortOrder]);
                     $toast = ['type' => 'success', 'msg' => "$name payment channel created!"];
                 }
             } catch (Throwable $e) {
@@ -1338,7 +1333,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
     if ($act === 'delete_payment_method') {
         $methodId = (int)$_POST['method_id'];
-        $pdo->prepare("DELETE FROM payment_methods WHERE id = ? AND subdomain_id = ?")->execute([$methodId, $subadminTenantId]);
+        $pdo->prepare("DELETE FROM payment_methods WHERE id = ?")->execute([$methodId]);
         $toast = ['type' => 'success', 'msg' => 'Payment Method deleted!'];
     }
 
@@ -1346,7 +1341,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $methodId = (int)$_POST['method_id'];
         $curr = (int)$_POST['current_status'];
         $new = ($curr === 1) ? 0 : 1;
-        $pdo->prepare("UPDATE payment_methods SET is_active = ? WHERE id = ? AND subdomain_id = ?")->execute([$new, $methodId, $subadminTenantId]);
+        $pdo->prepare("UPDATE payment_methods SET is_active = ? WHERE id = ?")->execute([$new, $methodId]);
         $toast = ['type' => 'success', 'msg' => "Channel status set to " . ($new === 1 ? 'ACTIVE' : 'OFFLINE')];
     }
 
@@ -1362,7 +1357,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $clientName = mb_substr(trim((string)($_POST['snzpay_client_name'] ?? '')), 0, 120);
         $on         = ($licenseKey !== '' && $paused === '0') ? '1' : '0';
         foreach (['snzpay_license_key' => $licenseKey, 'snzpay_api_url' => $apiUrl, 'snzpay_disabled' => $paused, 'snzpay_client_name' => $clientName, 'snzpay_auto_verify' => $on, 'auto_payment_on' => $on] as $__k => $__v) {
-            saveTenantSetting($pdo, $subadminTenantId, $__k, $__v);
+            saveSetting($pdo, $__k, $__v);
             $settings[$__k] = $__v;
         }
         $toast = ['type' => 'success', 'msg' => $on === '1' ? '✅ SNZPay saved — auto verification is ON' : ($licenseKey === '' ? 'SNZPay key removed — manual approval mode' : 'SNZPay saved (paused)')];
@@ -1372,7 +1367,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         if (trim((string)($settings['snzpay_license_key'] ?? '')) === '') {
             $toast = ['type' => 'error', 'msg' => 'Please save your SNZPay license key first.'];
         } else {
-            $testRes = subadmin_snzpay_verify_payment($pdo, $subadminTenantId, "TESTPING" . rand(1000, 9999), "BKASH", 10.0);
+            $testRes = admin_snzpay_verify_payment($pdo, "TESTPING" . rand(1000, 9999), "BKASH", 10.0);
             $tMsg = (string)($testRes['message'] ?? '');
             if (preg_match('/timeout|could not resolve|connection|failed to connect/i', $tMsg)) {
                 $toast = ['type' => 'error', 'msg' => '❌ SNZPay server not reachable: ' . $tMsg];
@@ -1401,12 +1396,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
         try {
             if ($segId > 0) {
-                $stmt = $pdo->prepare("UPDATE spin_segments SET title = ?, spend_target = ?, bonus_amount = ?, probability = ?, color = ?, sort_order = ?, is_active = ? WHERE id = ? AND subdomain_id = ?");
-                $stmt->execute([$title, $spendTarget, $bonusAmount, $probability, $color, $sortOrder, $isActive, $segId, $subadminTenantId]);
+                $stmt = $pdo->prepare("UPDATE spin_segments SET title = ?, spend_target = ?, bonus_amount = ?, probability = ?, color = ?, sort_order = ?, is_active = ? WHERE id = ?");
+                $stmt->execute([$title, $spendTarget, $bonusAmount, $probability, $color, $sortOrder, $isActive, $segId]);
                 $toast = ['type' => 'success', 'msg' => 'Segment updated!'];
             } else {
-                $stmt = $pdo->prepare("INSERT INTO spin_segments (subdomain_id, title, spend_target, bonus_amount, probability, color, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$subadminTenantId, $title, $spendTarget, $bonusAmount, $probability, $color, $sortOrder, $isActive]);
+                $stmt = $pdo->prepare("INSERT INTO spin_segments (title, spend_target, bonus_amount, probability, color, sort_order, is_active) VALUES ( ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->execute([ $title, $spendTarget, $bonusAmount, $probability, $color, $sortOrder, $isActive]);
                 $toast = ['type' => 'success', 'msg' => 'Segment added!'];
             }
         } catch (Throwable $e) {
@@ -1416,7 +1411,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
     if ($act === 'delete_spin_segment') {
         $segId = (int)$_POST['segment_id'];
-        $pdo->prepare("DELETE FROM spin_segments WHERE id = ? AND subdomain_id = ?")->execute([$segId, $subadminTenantId]);
+        $pdo->prepare("DELETE FROM spin_segments WHERE id = ?")->execute([$segId]);
         $toast = ['type' => 'success', 'msg' => 'Segment deleted!'];
     }
 
@@ -1426,10 +1421,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $dailyLimit  = max(1, (int)($_POST['spin_daily_limit'] ?? 5));
         $expiryHours = max(1, (int)($_POST['spin_offer_duration_hours'] ?? 24));
 
-        saveTenantSetting($pdo, $subadminTenantId, 'spin_wheel_enabled', $spinEnabled);
-        saveTenantSetting($pdo, $subadminTenantId, 'spin_cost', (string)$spinCost);
-        saveTenantSetting($pdo, $subadminTenantId, 'spin_daily_limit', (string)$dailyLimit);
-        saveTenantSetting($pdo, $subadminTenantId, 'spin_offer_duration_hours', (string)$expiryHours);
+        saveSetting($pdo, 'spin_wheel_enabled', $spinEnabled);
+        saveSetting($pdo, 'spin_cost', (string)$spinCost);
+        saveSetting($pdo, 'spin_daily_limit', (string)$dailyLimit);
+        saveSetting($pdo, 'spin_offer_duration_hours', (string)$expiryHours);
         $toast = ['type' => 'success', 'msg' => 'Spin rules saved!'];
     }
 
@@ -1438,7 +1433,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $fbKeys = ['firebase_api_key', 'firebase_auth_domain', 'firebase_project_id', 'firebase_storage_bucket', 'firebase_messaging_sender_id', 'firebase_app_id'];
         foreach ($fbKeys as $k) {
             $val = trim($_POST[$k] ?? '');
-            saveTenantSetting($pdo, $subadminTenantId, $k, $val);
+            saveSetting($pdo, $k, $val);
             $settings[$k] = $val;
         }
         $toast = ['type' => 'success', 'msg' => 'Firebase Web SDK Configuration Saved!'];
@@ -1460,12 +1455,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
         try {
             if ($bonusId > 0) {
-                $stmt = $pdo->prepare("UPDATE deposit_bonuses SET min_deposit = ?, bonus_amount = ?, bonus_type = ?, title = ?, claim_limit = ?, sort_order = ?, is_active = ? WHERE id = ? AND subdomain_id = ?");
-                $stmt->execute([$minDeposit, $bonusAmount, $bonusType, $title, $claimLimit, $sortOrder, $isActive, $bonusId, $subadminTenantId]);
+                $stmt = $pdo->prepare("UPDATE deposit_bonuses SET min_deposit = ?, bonus_amount = ?, bonus_type = ?, title = ?, claim_limit = ?, sort_order = ?, is_active = ? WHERE id = ?");
+                $stmt->execute([$minDeposit, $bonusAmount, $bonusType, $title, $claimLimit, $sortOrder, $isActive, $bonusId]);
                 $toast = ['type' => 'success', 'msg' => 'Reward tier updated!'];
             } else {
-                $stmt = $pdo->prepare("INSERT INTO deposit_bonuses (subdomain_id, min_deposit, bonus_amount, bonus_type, title, claim_limit, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$subadminTenantId, $minDeposit, $bonusAmount, $bonusType, $title, $claimLimit, $sortOrder, $isActive]);
+                $stmt = $pdo->prepare("INSERT INTO deposit_bonuses (min_deposit, bonus_amount, bonus_type, title, claim_limit, sort_order, is_active) VALUES ( ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->execute([ $minDeposit, $bonusAmount, $bonusType, $title, $claimLimit, $sortOrder, $isActive]);
                 $toast = ['type' => 'success', 'msg' => 'Reward tier added!'];
             }
         } catch (Throwable $e) {
@@ -1475,36 +1470,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
     if ($act === 'delete_deposit_bonus') {
         $bonusId = (int)$_POST['bonus_id'];
-        $pdo->prepare("DELETE FROM deposit_bonuses WHERE id = ? AND subdomain_id = ?")->execute([$bonusId, $subadminTenantId]);
+        $pdo->prepare("DELETE FROM deposit_bonuses WHERE id = ?")->execute([$bonusId]);
         $toast = ['type' => 'success', 'msg' => 'Reward tier deleted!'];
     }
 
     if ($act === 'manage_trx') {
         $trxId  = (int)($_POST['trx_db_id'] ?? 0);
         $status = (string)($_POST['status'] ?? '');
-        $stT = $pdo->prepare("SELECT * FROM transactions WHERE id = ? AND subdomain_id = ? LIMIT 1");
-        $stT->execute([$trxId, $subadminTenantId]);
+        $stT = $pdo->prepare("SELECT * FROM transactions WHERE id = ? LIMIT 1");
+        $stT->execute([$trxId]);
         $trx = $stT->fetch(PDO::FETCH_ASSOC);
         if ($trx && $trx['status'] === 'pending') {
             $isOrder = vpIsOrderTrx($trx);
             if ($status === 'approved' && $isOrder) {
                 // 🛡️ অর্ডার: কি ডেলিভারি হবে — ব্যালেন্সে টাকা যোগ হবে না
-                $res = vpAdminDeliverOrder($pdo, $trx, $subadminTenantId, $settings, 'ADMIN');
+                $res = vpAdminDeliverOrder($pdo, $trx, $settings, 'ADMIN');
                 $toast = $res['ok']
                     ? ['type' => 'success', 'msg' => '✅ Order approved — ' . count($res['keys']) . ' key(s) delivered to the customer (' . $res['product'] . ')']
                     : ['type' => 'error', 'msg' => '⚠️ ' . $res['message']];
             } elseif ($status === 'approved' || ($status === 'credit_wallet' && $isOrder)) {
                 // ডিপোজিট (অথবা অ্যাডমিন নিজে "Credit Wallet" বাছলে) → ব্যালেন্সে যোগ
-                $up = $pdo->prepare("UPDATE transactions SET status = 'approved' WHERE id = ? AND subdomain_id = ? AND status = 'pending'");
-                $up->execute([$trxId, $subadminTenantId]);
+                $up = $pdo->prepare("UPDATE transactions SET status = 'approved' WHERE id = ? AND status = 'pending'");
+                $up->execute([$trxId]);
                 if ($up->rowCount() === 1) {
                     $bonusFloat = (!empty($trx['bonus_amount']) && (float)$trx['bonus_amount'] > 0) ? round((float)$trx['bonus_amount'] / $effectiveBdtRate, 2) : 0.00;
                     $totalCredit = max(0.0, (float)$trx['amount'] + ($isOrder ? 0.0 : $bonusFloat));
-                    $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ? AND subdomain_id = ?")->execute([$totalCredit, $trx['user_id'], $subadminTenantId]);
+                    $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$totalCredit, $trx['user_id']]);
                     $toast = ['type' => 'success', 'msg' => $isOrder ? 'Order amount credited to customer wallet.' : 'Deposit approved & balance added!'];
                 }
             } elseif ($status === 'rejected') {
-                $pdo->prepare("UPDATE transactions SET status = 'rejected' WHERE id = ? AND subdomain_id = ? AND status = 'pending'")->execute([$trxId, $subadminTenantId]);
+                $pdo->prepare("UPDATE transactions SET status = 'rejected' WHERE id = ? AND status = 'pending'")->execute([$trxId]);
                 $toast = ['type' => 'success', 'msg' => ($isOrder ? 'Order' : 'Deposit') . ' rejected.'];
             }
         }
@@ -1521,7 +1516,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
             if (!array_key_exists($k, $_POST)) continue; // 🛡️ ফর্মে না থাকা সেটিং (SNZPay key, banner URL ইত্যাদি) আর '0' দিয়ে মুছে যাবে না
             $val = trim($_POST[$k] ?? '0');
             if (in_array($k, ['usdt_rate', 'inr_rate', 'binance_market_rate'], true)) $val = (string)max(1.0, (float)$val);
-            saveTenantSetting($pdo, $subadminTenantId, $k, $val);
+            saveSetting($pdo, $k, $val);
             $settings[$k] = $val;
         }
 
@@ -1529,10 +1524,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         if (!empty($_FILES['payment_banner_file']['name']) && $_FILES['payment_banner_file']['error'] === UPLOAD_ERR_OK) {
             $ext = strtolower(pathinfo($_FILES['payment_banner_file']['name'], PATHINFO_EXTENSION));
             if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
-                $fileName = 'pm_sub_' . $subadminTenantId . '_mainbanner_' . time() . '.' . $ext;
+                $fileName = 'pm_mainbanner_' . time() . '.' . $ext;
                 if (move_uploaded_file($_FILES['payment_banner_file']['tmp_name'], $bannerUploadDir . $fileName)) {
                     $bannerPath = 'uploads/banners/' . $fileName;
-                    saveTenantSetting($pdo, $subadminTenantId, 'payment_banner_url', $bannerPath);
+                    saveSetting($pdo, 'payment_banner_url', $bannerPath);
                     $settings['payment_banner_url'] = $bannerPath;
                 }
             }
@@ -1544,7 +1539,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     }
 
     if ($act === 'update_branding_settings') {
-        $newSiteName = trim($_POST['site_name'] ?? '') ?: ($activeTenant['site_title'] ?? 'My Store');
+        $newSiteName = trim($_POST['site_name'] ?? '') ;
         $siteLogoPath = $settings['site_logo'] ?? '';
         $loadingLogoPath = $settings['loading_logo'] ?? '';
         $appDownloadUrl = trim($_POST['app_download_url'] ?? '');
@@ -1555,7 +1550,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         if (!empty($_FILES['site_logo_file']['name']) && $_FILES['site_logo_file']['error'] === UPLOAD_ERR_OK) {
             $ext = strtolower(pathinfo($_FILES['site_logo_file']['name'], PATHINFO_EXTENSION));
             if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'])) {
-                $fileName = 'site_logo_sub_' . $subadminTenantId . '_' . time() . '.' . $ext;
+                $fileName = 'site_logo_' . time() . '.' . $ext;
                 if (move_uploaded_file($_FILES['site_logo_file']['tmp_name'], $siteUploadDir . $fileName)) {
                     $siteLogoPath = 'uploads/site/' . $fileName;
                 }
@@ -1565,7 +1560,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         if (!empty($_FILES['loading_logo_file']['name']) && $_FILES['loading_logo_file']['error'] === UPLOAD_ERR_OK) {
             $ext = strtolower(pathinfo($_FILES['loading_logo_file']['name'], PATHINFO_EXTENSION));
             if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'])) {
-                $fileName = 'loading_logo_sub_' . $subadminTenantId . '_' . time() . '.' . $ext;
+                $fileName = 'loading_logo_' . time() . '.' . $ext;
                 if (move_uploaded_file($_FILES['loading_logo_file']['tmp_name'], $siteUploadDir . $fileName)) {
                     $loadingLogoPath = 'uploads/site/' . $fileName;
                 }
@@ -1604,7 +1599,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         ];
 
         foreach ($brandArray as $k => $v) {
-            saveTenantSetting($pdo, $subadminTenantId, $k, $v);
+            saveSetting($pdo, $k, $v);
             $settings[$k] = $v;
         }
         $toast = ['type' => 'success', 'msg' => 'Store branding & support settings saved!'];
@@ -1616,10 +1611,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $bonusBdt     = max(0.0, (float)($_POST['referrer_bonus_bdt'] ?? 0));
         $isActive     = isset($_POST['is_active']) ? 1 : 0;
 
-        $stmtRef = $pdo->prepare("INSERT INTO referral_settings (subdomain_id, token_per_referral, referrer_bonus_bdt, is_active)
-            VALUES (?, ?, ?, ?)
+        $stmtRef = $pdo->prepare("INSERT INTO referral_settings (id, token_per_referral, referrer_bonus_bdt, is_active)
+            VALUES (1, ?, ?, ?)
             ON DUPLICATE KEY UPDATE token_per_referral = VALUES(token_per_referral), referrer_bonus_bdt = VALUES(referrer_bonus_bdt), is_active = VALUES(is_active)");
-        $stmtRef->execute([$subadminTenantId, $tokensPerRef, $bonusBdt, $isActive]);
+        $stmtRef->execute([ $tokensPerRef, $bonusBdt, $isActive]);
         $toast = ['type' => 'success', 'msg' => 'Store referral token & reward rules saved!'];
     }
 
@@ -1628,14 +1623,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $catName  = strtoupper(trim($_POST['category_name'] ?? ''));
         $catOrder = (int)($_POST['sort_order'] ?? 0);
         if (!empty($catName)) {
-            $pdo->prepare("INSERT INTO product_categories (subdomain_id, name, sort_order, is_active) VALUES (?, ?, ?, 1)")
-                ->execute([$subadminTenantId, $catName, $catOrder]);
+            $pdo->prepare("INSERT INTO product_categories (name, sort_order, is_active) VALUES ( ?, ?, 1)")
+                ->execute([ $catName, $catOrder]);
             $toast = ['type' => 'success', 'msg' => "Category '$catName' added with sequence order $catOrder!"];
         }
     }
     if ($act === 'delete_product_category') {
         $catId = (int)$_POST['category_id'];
-        $pdo->prepare("DELETE FROM product_categories WHERE id = ? AND subdomain_id = ?")->execute([$catId, $subadminTenantId]);
+        $pdo->prepare("DELETE FROM product_categories WHERE id = ?")->execute([$catId]);
         $toast = ['type' => 'success', 'msg' => 'Category deleted!'];
     }
 
@@ -1651,17 +1646,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
         if (!empty($_FILES['popup_image']['name']) && $_FILES['popup_image']['error'] === UPLOAD_ERR_OK) {
             $ext = strtolower(pathinfo($_FILES['popup_image']['name'], PATHINFO_EXTENSION));
-            $fileName = 'popup_sub_' . $subadminTenantId . '_' . time() . '.' . $ext;
+            $fileName = 'popup_' . time() . '.' . $ext;
             if (move_uploaded_file($_FILES['popup_image']['tmp_name'], $siteUploadDir . $fileName)) {
                 $imagePath = 'uploads/site/' . $fileName;
             }
         }
-        $pdo->prepare("INSERT INTO custom_popups (subdomain_id, title, message, image_url, link_url, link_text, show_once_per_session, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)")
-            ->execute([$subadminTenantId, $title, $message, $imagePath, $linkUrl, $linkText, $showOnce, $sort]);
+        $pdo->prepare("INSERT INTO custom_popups (title, message, image_url, link_url, link_text, show_once_per_session, sort_order, is_active) VALUES ( ?, ?, ?, ?, ?, ?, ?, 1)")
+            ->execute([ $title, $message, $imagePath, $linkUrl, $linkText, $showOnce, $sort]);
         $toast = ['type' => 'success', 'msg' => 'Custom Entry Pop-up created for your store!'];
     }
     if ($act === 'delete_custom_popup') {
-        $pdo->prepare("DELETE FROM custom_popups WHERE id = ? AND subdomain_id = ?")->execute([(int)$_POST['popup_id'], $subadminTenantId]);
+        $pdo->prepare("DELETE FROM custom_popups WHERE id = ?")->execute([(int)$_POST['popup_id']]);
         $toast = ['type' => 'success', 'msg' => 'Popup deleted!'];
     }
 
@@ -1673,20 +1668,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 
         if (!empty($_FILES['banner_photo']['name']) && $_FILES['banner_photo']['error'] === UPLOAD_ERR_OK) {
             $ext = strtolower(pathinfo($_FILES['banner_photo']['name'], PATHINFO_EXTENSION));
-            $fileName = 'banner_sub_' . $subadminTenantId . '_' . time() . '_' . rand(100, 999) . '.' . $ext;
+            $fileName = 'banner_' . time() . '_' . rand(100, 999) . '.' . $ext;
             if (move_uploaded_file($_FILES['banner_photo']['tmp_name'], $bannerUploadDir . $fileName)) {
                 $bannerPath = 'uploads/banners/' . $fileName;
             }
         }
         if (!empty($bannerPath)) {
-            $pdo->prepare("INSERT INTO banners (image_url, target_link, title, sort_order, is_active, subdomain_id) VALUES (?, ?, ?, ?, 1, ?)")
-                ->execute([$bannerPath, $targetLink ?: null, $title, $sort, $subadminTenantId]);
+            $pdo->prepare("INSERT INTO banners (image_url, target_link, title, sort_order, is_active) VALUES (?, ?, ?, ?, 1)")
+                ->execute([$bannerPath, $targetLink ?: null, $title, $sort]);
             $toast = ['type' => 'success', 'msg' => 'Banner added!'];
         }
     }
 
     if ($act === 'delete_banner') {
-        $pdo->prepare("DELETE FROM banners WHERE id = ? AND subdomain_id = ?")->execute([(int)$_POST['banner_id'], $subadminTenantId]);
+        $pdo->prepare("DELETE FROM banners WHERE id = ?")->execute([(int)$_POST['banner_id']]);
         $toast = ['type' => 'success', 'msg' => 'Banner deleted!'];
     }
 
@@ -1697,15 +1692,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $specificUid = !empty($_POST['specific_user_id']) ? (int)$_POST['specific_user_id'] : null;
 
         if (!empty($title) && !empty($msg)) {
-            $pdo->prepare("INSERT INTO system_notifications (target_type, target_user_id, title, message, scope, subdomain_id) VALUES (?, ?, ?, ?, 'sub_only', ?)")
-                ->execute([$target, $specificUid, $title, $msg, $subadminTenantId]);
+            $pdo->prepare("INSERT INTO system_notifications (target_type, target_user_id, title, message, scope) VALUES (?, ?, ?, ?, 'sub_only')")
+                ->execute([$target, $specificUid, $title, $msg]);
             $toast = ['type' => 'success', 'msg' => "Notification broadcasted!"];
         }
     }
 
     if ($act === 'delete_push_notification') {
         $notifId = (int)($_POST['notif_id'] ?? 0);
-        $pdo->prepare("DELETE FROM system_notifications WHERE id = ? AND subdomain_id = ?")->execute([$notifId, $subadminTenantId]);
+        $pdo->prepare("DELETE FROM system_notifications WHERE id = ?")->execute([$notifId]);
         $toast = ['type' => 'success', 'msg' => "Notification deleted!"];
     }
 
@@ -1713,7 +1708,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $userId = (int)$_POST['user_id'];
         $amount = (float)$_POST['amount'];
         if ($_POST['type'] === 'deduct') $amount = -$amount;
-        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ? AND (subdomain_id = ? OR created_by_subdomain = ?)")->execute([$amount, $userId, $subadminTenantId, $subadminSlug]);
+        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $userId]);
         $toast = ['type' => 'success', 'msg' => "Balance updated!"];
     }
 
@@ -1721,14 +1716,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $userId = (int)$_POST['user_id'];
         $amount = (int)$_POST['coins_amount'];
         if ($_POST['type'] === 'deduct') $amount = -$amount;
-        $pdo->prepare("UPDATE users SET coins = GREATEST(0, coins + ?) WHERE id = ? AND (subdomain_id = ? OR created_by_subdomain = ?)")->execute([$amount, $userId, $subadminTenantId, $subadminSlug]);
+        $pdo->prepare("UPDATE users SET coins = GREATEST(0, coins + ?) WHERE id = ?")->execute([$amount, $userId]);
         $toast = ['type' => 'success', 'msg' => "Coins updated!"];
     }
 
     if ($act === 'toggle_ban') {
         $userId = (int)$_POST['user_id'];
         $newStatus = $_POST['status'] === 'active' ? 'banned' : 'active';
-        $pdo->prepare("UPDATE users SET status = ? WHERE id = ? AND (subdomain_id = ? OR created_by_subdomain = ?)")->execute([$newStatus, $userId, $subadminTenantId, $subadminSlug]);
+        $pdo->prepare("UPDATE users SET status = ? WHERE id = ?")->execute([$newStatus, $userId]);
         $toast = ['type' => 'success', 'msg' => "Status changed to $newStatus!"];
     }
 
@@ -1737,7 +1732,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     if ($act === 'bulk_save_reseller_prices') {
         $rPrices = $_POST['rp_price'] ?? [];
         $rDiscs  = $_POST['rp_disc'] ?? [];
-        $updStmt = $pdo->prepare("UPDATE product_plans SET reseller_price = ?, reseller_discount_percent = ? WHERE id = ? AND subdomain_id = ?");
+        $updStmt = $pdo->prepare("UPDATE product_plans SET reseller_price = ?, reseller_discount_percent = ? WHERE id = ?");
         $changed = 0;
         if (is_array($rPrices)) {
             foreach ($rPrices as $plId => $rawPrice) {
@@ -1746,20 +1741,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                 if ($plId <= 0 || $rawPrice === '' || !is_numeric($rawPrice)) continue;
                 $price = max(0.01, round((float)$rawPrice, 2));
                 $disc  = max(0.0, min(99.0, (float)($rDiscs[$plId] ?? 0)));
-                $updStmt->execute([$price, $disc, $plId, $subadminTenantId]);
+                $updStmt->execute([$price, $disc, $plId]);
                 $changed += $updStmt->rowCount();
             }
         }
         // যেসব রিসেলারের নিজস্ব % ডিসকাউন্ট আছে তাদের ক্যাশ করা দাম নতুন রিসেলার প্রাইস থেকে আবার হিসাব
         try {
-            $rsStmt = $pdo->prepare("SELECT id FROM users WHERE role = 'reseller' AND subdomain_id = ? AND discount_percent > 0");
-            $rsStmt->execute([$subadminTenantId]);
-            foreach ($rsStmt->fetchAll(PDO::FETCH_COLUMN) as $rsId) { syncTenantStackedPricesForUser($pdo, (int)$rsId, $subadminTenantId); }
+            $rsStmt = $pdo->prepare("SELECT id FROM users WHERE role = 'reseller' AND discount_percent > 0");
+            $rsStmt->execute([]);
+            foreach ($rsStmt->fetchAll(PDO::FETCH_COLUMN) as $rsId) { syncStackedPricesForUser($pdo, (int)$rsId); }
         } catch (Throwable $e) {}
         $toast = ['type' => 'success', 'msg' => "Reseller prices saved ($changed variants updated)!"];
     }
 
-    if ($act === 'save_user_custom_pricing_and_access' && !vpSubOwnsUser($pdo, (int)($_POST['target_user_id'] ?? 0), $subadminTenantId, (string)$subadminSlug)) {
+    if ($act === 'save_user_custom_pricing_and_access' && !vpSubOwnsUser($pdo, (int)($_POST['target_user_id'] ?? 0))) {
         $toast = ['type' => 'error', 'msg' => 'This user does not belong to your store.'];
         $act = '';
     }
@@ -1768,7 +1763,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $role = in_array($_POST['user_role'] ?? '', ['customer', 'reseller']) ? $_POST['user_role'] : 'customer';
         $canAddFund = isset($_POST['can_add_fund']) ? 1 : 0;
 
-        $pdo->prepare("UPDATE users SET role = ?, can_add_fund = ? WHERE id = ? AND (subdomain_id = ? OR created_by_subdomain = ?)")->execute([$role, $canAddFund, $userId, $subadminTenantId, $subadminSlug]);
+        $pdo->prepare("UPDATE users SET role = ?, can_add_fund = ? WHERE id = ?")->execute([$role, $canAddFund, $userId]);
 
         $allowedProds = $_POST['allowed_products'] ?? [];
         $pdo->prepare("DELETE FROM user_allowed_products WHERE user_id = ?")->execute([$userId]);
@@ -1793,34 +1788,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 }
 
 // ====================================================================
-// STRICTLY FILTERED TENANT DATA (ZERO MOTHER DATA VISIBLE)
+// STORE DATA
 // ====================================================================
-$tenantUserFilter = "(subdomain_id = $subadminTenantId OR created_by_subdomain = " . $pdo->quote($subadminSlug) . ")";
+$storeUserFilter = "1=1";
 
-$totalUsers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $tenantUserFilter")->fetchColumn() ?: 0);
-$totalCustomers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $tenantUserFilter AND (role = 'customer' OR role IS NULL OR role = '')")->fetchColumn() ?: 0);
-$totalResellers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $tenantUserFilter AND role = 'reseller'")->fetchColumn() ?: 0);
-$totalFunds = (float)($pdo->query("SELECT SUM(balance) FROM users WHERE $tenantUserFilter")->fetchColumn() ?: 0.00);
+$totalUsers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $storeUserFilter")->fetchColumn() ?: 0);
+$totalCustomers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $storeUserFilter AND (role = 'customer' OR role IS NULL OR role = '')")->fetchColumn() ?: 0);
+$totalResellers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $storeUserFilter AND role = 'reseller'")->fetchColumn() ?: 0);
+$totalFunds = (float)($pdo->query("SELECT SUM(balance) FROM users WHERE $storeUserFilter")->fetchColumn() ?: 0.00);
 
-$todaySales = (float)($pdo->query("SELECT SUM(l.price) FROM licenses l WHERE l.subdomain_id = $subadminTenantId AND DATE(l.created_at) = CURDATE()")->fetchColumn() ?: 0.00);
-$monthSales = (float)($pdo->query("SELECT SUM(l.price) FROM licenses l WHERE l.subdomain_id = $subadminTenantId AND MONTH(l.created_at) = MONTH(CURDATE()) AND YEAR(l.created_at) = YEAR(CURDATE())")->fetchColumn() ?: 0.00);
-$allTimeSales = (float)($pdo->query("SELECT SUM(l.price) FROM licenses l WHERE l.subdomain_id = $subadminTenantId")->fetchColumn() ?: 0.00);
-$totalLicenses = (int)($pdo->query("SELECT COUNT(l.id) FROM licenses l WHERE l.subdomain_id = $subadminTenantId")->fetchColumn() ?: 0);
+$todaySales = (float)($pdo->query("SELECT SUM(l.price) FROM licenses l WHERE DATE(l.created_at) = CURDATE()")->fetchColumn() ?: 0.00);
+$monthSales = (float)($pdo->query("SELECT SUM(l.price) FROM licenses l WHERE MONTH(l.created_at) = MONTH(CURDATE()) AND YEAR(l.created_at) = YEAR(CURDATE())")->fetchColumn() ?: 0.00);
+$allTimeSales = (float)($pdo->query("SELECT SUM(l.price) FROM licenses l ")->fetchColumn() ?: 0.00);
+$totalLicenses = (int)($pdo->query("SELECT COUNT(l.id) FROM licenses l ")->fetchColumn() ?: 0);
 
-$pendingTrxCount = (int)($pdo->query("SELECT COUNT(t.id) FROM transactions t WHERE t.subdomain_id = $subadminTenantId AND t.status = 'pending'")->fetchColumn() ?: 0);
+$pendingTrxCount = (int)($pdo->query("SELECT COUNT(t.id) FROM transactions t WHERE t.status = 'pending'")->fetchColumn() ?: 0);
 
-$usersList = $pdo->query("SELECT u.*, (SELECT COUNT(*) FROM licenses WHERE user_id = u.id AND subdomain_id = $subadminTenantId) AS total_sold_keys FROM users u WHERE $tenantUserFilter ORDER BY u.id DESC")->fetchAll(PDO::FETCH_ASSOC);
+$usersList = $pdo->query("SELECT u.*, (SELECT COUNT(*) FROM licenses WHERE user_id = u.id) AS total_sold_keys FROM users u WHERE $storeUserFilter ORDER BY u.id DESC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Products catalog for this tenant ONLY
+// Products catalog
 $productsData = [];
 $allProductPlansFlat = [];
 try {
-    $productsQuery = $pdo->prepare("SELECT * FROM products WHERE subdomain_id = ? ORDER BY sort_order ASC, id DESC");
-    $productsQuery->execute([$subadminTenantId]);
+    $productsQuery = $pdo->prepare("SELECT * FROM products  ORDER BY sort_order ASC, id DESC");
+    $productsQuery->execute([]);
     $rawProds = $productsQuery->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rawProds as $pr) {
-        $plansQuery = $pdo->prepare("SELECT p.*, (SELECT COUNT(*) FROM stock_keys s WHERE s.plan_id = p.id AND s.status = 'available' AND s.subdomain_id = ?) AS stock_count FROM product_plans p WHERE p.product_id = ? AND p.subdomain_id = ? ORDER BY p.user_price ASC, p.id ASC");
-        $plansQuery->execute([$subadminTenantId, $pr['id'], $subadminTenantId]);
+        $plansQuery = $pdo->prepare("SELECT p.*, (SELECT COUNT(*) FROM stock_keys s WHERE s.plan_id = p.id AND s.status = 'available') AS stock_count FROM product_plans p WHERE p.product_id = ? ORDER BY p.user_price ASC, p.id ASC");
+        $plansQuery->execute([ $pr['id']]);
         $pr['plans'] = $plansQuery->fetchAll(PDO::FETCH_ASSOC);
         foreach ($pr['plans'] as $pl) {
             $pl['product_name'] = $pr['name'];
@@ -1836,10 +1831,10 @@ if (!empty($settings['km_api_key'])) {
         SELECT pl.*, p.name as product_name 
         FROM product_plans pl 
         JOIN products p ON pl.product_id = p.id 
-        WHERE pl.api_plan_id > 0 AND pl.subdomain_id = ?
+        WHERE pl.api_plan_id > 0
         ORDER BY pl.id DESC
     ");
-    $kmImportedPlans->execute([$subadminTenantId]);
+    $kmImportedPlans->execute([]);
     $kmImportedPlans = $kmImportedPlans->fetchAll(PDO::FETCH_ASSOC);
 }
 $kmImportedCount = count($kmImportedPlans);
@@ -1847,40 +1842,40 @@ $kmImportedCount = count($kmImportedPlans);
 // Fetch Payment Methods
 $paymentMethodsList = [];
 try {
-    $stmtPM = $pdo->prepare("SELECT * FROM payment_methods WHERE subdomain_id = ? ORDER BY sort_order ASC, id ASC");
-    $stmtPM->execute([$subadminTenantId]);
+    $stmtPM = $pdo->prepare("SELECT * FROM payment_methods  ORDER BY sort_order ASC, id ASC");
+    $stmtPM->execute([]);
     $paymentMethodsList = $stmtPM->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {}
 
 // Isolated Spin, Bonus & Staff
-$spinSegments = $pdo->prepare("SELECT * FROM spin_segments WHERE subdomain_id = ? ORDER BY sort_order ASC, id ASC");
-$spinSegments->execute([$subadminTenantId]);
+$spinSegments = $pdo->prepare("SELECT * FROM spin_segments  ORDER BY sort_order ASC, id ASC");
+$spinSegments->execute([]);
 $spinSegments = $spinSegments->fetchAll(PDO::FETCH_ASSOC);
 
-$depositBonusesList = $pdo->prepare("SELECT * FROM deposit_bonuses WHERE subdomain_id = ? ORDER BY sort_order ASC, min_deposit ASC");
-$depositBonusesList->execute([$subadminTenantId]);
+$depositBonusesList = $pdo->prepare("SELECT * FROM deposit_bonuses  ORDER BY sort_order ASC, min_deposit ASC");
+$depositBonusesList->execute([]);
 $depositBonusesList = $depositBonusesList->fetchAll(PDO::FETCH_ASSOC);
 
 
-$bannersList = $pdo->prepare("SELECT * FROM banners WHERE subdomain_id = ? ORDER BY sort_order ASC, id DESC");
-$bannersList->execute([$subadminTenantId]);
+$bannersList = $pdo->prepare("SELECT * FROM banners  ORDER BY sort_order ASC, id DESC");
+$bannersList->execute([]);
 $bannersList = $bannersList->fetchAll(PDO::FETCH_ASSOC);
 
-$sentNotifications = $pdo->prepare("SELECT * FROM system_notifications WHERE subdomain_id = ? ORDER BY id DESC LIMIT 30");
-$sentNotifications->execute([$subadminTenantId]);
+$sentNotifications = $pdo->prepare("SELECT * FROM system_notifications  ORDER BY id DESC LIMIT 30");
+$sentNotifications->execute([]);
 $sentNotifications = $sentNotifications->fetchAll(PDO::FETCH_ASSOC);
 
-$transactions = $pdo->prepare("SELECT t.*, u.username, u.email FROM transactions t JOIN users u ON t.user_id = u.id WHERE t.subdomain_id = ? ORDER BY t.id DESC LIMIT 50");
-$transactions->execute([$subadminTenantId]);
+$transactions = $pdo->prepare("SELECT t.*, u.username, u.email FROM transactions t JOIN users u ON t.user_id = u.id  ORDER BY t.id DESC LIMIT 50");
+$transactions->execute([]);
 $transactions = $transactions->fetchAll(PDO::FETCH_ASSOC);
 
-$sales = $pdo->prepare("SELECT l.*, u.username, u.email FROM licenses l JOIN users u ON l.user_id = u.id WHERE l.subdomain_id = ? ORDER BY l.id DESC LIMIT 50");
-$sales->execute([$subadminTenantId]);
+$sales = $pdo->prepare("SELECT l.*, u.username, u.email FROM licenses l JOIN users u ON l.user_id = u.id  ORDER BY l.id DESC LIMIT 50");
+$sales->execute([]);
 $sales = $sales->fetchAll(PDO::FETCH_ASSOC);
 
 $totalStockKeys = 0;
 if (!empty($productsData)) {
-    $totalStockKeys = (int)($pdo->query("SELECT COUNT(id) FROM stock_keys WHERE subdomain_id = $subadminTenantId AND status = 'available'")->fetchColumn() ?: 0);
+    $totalStockKeys = (int)($pdo->query("SELECT COUNT(id) FROM stock_keys WHERE status = 'available'")->fetchColumn() ?: 0);
 }
 
 $userCustomPricesMap = [];
@@ -1896,7 +1891,7 @@ foreach ($aProdRows as $ap) {
 }
 
 // Anti-freeze Cached Provider Balance for Sub-Admin
-$providerBalance = subadmin_km_cached_balance($pdo, $subadminTenantId);
+$providerBalance = admin_km_cached_balance($pdo);
 $mainThemeColor = $settings['main_site_theme_color'] ?? '#3b82f6';
 $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Store';
 ?>
@@ -2287,11 +2282,10 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             <!-- SUB-SECTION 4: 🎟️ COUPON MANAGER (v2) -->
             <div id="disc-view-coupons" class="hidden space-y-4">
                 <?php
-                $cpScopeId = (int)$subadminTenantId;
                 $cpList = [];
                 try {
-                    $stCp = $pdo->prepare("SELECT * FROM coupons WHERE subdomain_id = ? ORDER BY id DESC");
-                    $stCp->execute([$cpScopeId]);
+                    $stCp = $pdo->prepare("SELECT * FROM coupons  ORDER BY id DESC");
+                    $stCp->execute([]);
                     $cpList = $stCp->fetchAll(PDO::FETCH_ASSOC);
                 } catch (Throwable $e) {}
                 $cpProdNames = [];

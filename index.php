@@ -1,7 +1,7 @@
 <?php
 /**
  * ====================================================================
- * STOREFRONT & CLIENT CONSOLE — SINGLE STORE (no subdomains, no Telegram bot)
+ * STOREFRONT & CLIENT CONSOLE — single store
  * VERSION: 23.0 (professional colour theme, editable maintenance popup)
  * ====================================================================
  */
@@ -37,15 +37,6 @@ if (isset($_GET['logout']) || (isset($_GET['action']) && $_GET['action'] === 'lo
     exit;
 }
 
-// ====================================================================
-// 2. SINGLE STORE (subdomain system removed)
-// ====================================================================
-// সব ডাটা subdomain_id = 0 এর নিচে থাকে — ডাটাবেজ কাঠামো একই, শুধু সাব-ডোমেইন লজিক নেই।
-$currentHost          = strtolower(preg_replace('/^www\./', '', preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? '')));
-$mainDomain           = $currentHost;
-$tenant               = null;
-$currentSubdomainId   = 0;
-$currentSubdomainSlug = 'main';
 
 // ====================================================================
 // 🗄️ DATABASE: সব টেবিল/কলাম এখন database.sql ফাইলে (phpMyAdmin → Import)।
@@ -57,13 +48,13 @@ if (!is_dir($__avatarDir)) @mkdir($__avatarDir, 0755, true);
 
 // Auto-seed Payment Methods if empty
 try {
-    $chkMethods = (int)$pdo->query("SELECT COUNT(*) FROM payment_methods WHERE subdomain_id = 0")->fetchColumn();
+    $chkMethods = (int)$pdo->query("SELECT COUNT(*) FROM payment_methods ")->fetchColumn();
     if ($chkMethods === 0) {
         $bkashNum  = defined('BKASH_NUMBER') ? BKASH_NUMBER : '01700000000';
         $nagadNum  = defined('NAGAD_NUMBER') ? NAGAD_NUMBER : '01800000000';
         $rocketNum = defined('ROCKET_NUMBER') ? ROCKET_NUMBER : '01900000000';
-        $stmtSeed = $pdo->prepare("INSERT INTO payment_methods (subdomain_id, method_key, name, account_number, account_type, is_active, allow_add_fund, allow_checkout, sort_order) VALUES (?, ?, ?, ?, ?, 1, 1, 1, ?)");
-        $stmtSeed->execute([0, 'bkash', 'bKash', $bkashNum, 'Personal', 1]);
+        $stmtSeed = $pdo->prepare("INSERT INTO payment_methods (method_key, name, account_number, account_type, is_active, allow_add_fund, allow_checkout, sort_order) VALUES ( ?, ?, ?, ?, 1, 1, 1, ?)");
+        $stmtSeed->execute([ 'bkash', 'bKash', $bkashNum, 'Personal', 1]);
         $stmtSeed->execute([0, 'nagad', 'Nagad', $nagadNum, 'Personal', 2]);
         $stmtSeed->execute([0, 'rocket', 'Rocket', $rocketNum, 'Personal', 3]);
     }
@@ -73,24 +64,23 @@ try {
 // 3B. UNIVERSAL PRODUCT & PLAN SYNC HEALER ENGINE
 // ⚡ SPEED: heavy UPDATE queries throttled to once every 2 minutes per store
 // ====================================================================
-$__healFlagFile = __DIR__ . '/uploads/.heal_' . (int)$currentSubdomainId . '.flag';
+$__healFlagFile = __DIR__ . '/uploads/.heal.flag';
 $__runHealer    = $runSchemaMigrations || !is_file($__healFlagFile) || (time() - (int)@filemtime($__healFlagFile)) > 120;
 if ($__runHealer) { @touch($__healFlagFile); }
 if ($__runHealer) try {
     $pdo->exec("UPDATE products SET is_deleted = 0, is_active = 1, status = 'active' 
-                WHERE (subdomain_id = 0 OR subdomain_id IS NULL OR subdomain_id = '') 
-                  AND (name IS NOT NULL AND TRIM(name) != '') 
+                WHERE (name IS NOT NULL AND TRIM(name) != '') 
                   AND (status != 'inactive')
                   AND (is_maintenance = 0 OR is_maintenance IS NULL)");
 
     $pdo->exec("UPDATE product_plans SET is_deleted = 0, is_active = 1 
-                WHERE (subdomain_id = 0 OR subdomain_id IS NULL OR subdomain_id = '')");
+                ");
 
 
 } catch (Throwable $e) {}
 
 // ====================================================================
-// 4. CONFIGURATION ENGINE & SUBDOMAIN SETTINGS RESOLUTION
+// 4. CONFIGURATION ENGINE & SETTINGS
 // ====================================================================
 $defaultSupportLink = defined('SUPPORT_LINK') ? SUPPORT_LINK : (defined('TELEGRAM_SUPPORT') ? TELEGRAM_SUPPORT : '');
 $defaultFirebaseUrl = defined('FIREBASE_URL') ? FIREBASE_URL : '';
@@ -161,29 +151,29 @@ $isDepositOnline = (($settings['deposit_system_status'] ?? '1') === '1');
 $isSiteMaintenance = (($settings['site_maintenance_mode'] ?? '0') === '1');
 
 // Support links (Strict Isolation: Never fallback to hardcoded mother bot)
-$tenantTelegram = '';
-$tenantWhatsapp = '';
+$supTgRaw = '';
+$supWaRaw = '';
 
-if (empty($tenantTelegram) && !empty($settings['support_telegram'])) {
-    $tenantTelegram = trim($settings['support_telegram']);
-} elseif (empty($tenantTelegram) && !empty($settings['telegram_tutorial_link']) && stripos($settings['telegram_tutorial_link'], 'OfficialSupport') === false) {
-    $tenantTelegram = trim($settings['telegram_tutorial_link']);
+if (empty($supTgRaw) && !empty($settings['support_telegram'])) {
+    $supTgRaw = trim($settings['support_telegram']);
+} elseif (empty($supTgRaw) && !empty($settings['telegram_tutorial_link']) && stripos($settings['telegram_tutorial_link'], 'OfficialSupport') === false) {
+    $supTgRaw = trim($settings['telegram_tutorial_link']);
 }
 
-if (empty($tenantWhatsapp) && !empty($settings['support_whatsapp'])) {
-    $tenantWhatsapp = trim($settings['support_whatsapp']);
+if (empty($supWaRaw) && !empty($settings['support_whatsapp'])) {
+    $supWaRaw = trim($settings['support_whatsapp']);
 }
 
 // 💬 সাপোর্ট বাটন: admin → Site Settings এ Telegram / WhatsApp দিলে তবেই দেখাবে, না দিলে কিছুই আসবে না
 $supportTgUrl = '';
-$__tg = trim((string)$tenantTelegram);
+$__tg = trim((string)$supTgRaw);
 if ($__tg !== '') {
     if (preg_match('#^https?://#i', $__tg))                    $supportTgUrl = $__tg;
     elseif (preg_match('#^(t\.me|telegram\.me)/#i', $__tg))   $supportTgUrl = 'https://' . $__tg;
     else                                                       $supportTgUrl = 'https://t.me/' . ltrim($__tg, '@');
 }
 $supportWaUrl = '';
-$__wa = trim((string)$tenantWhatsapp);
+$__wa = trim((string)$supWaRaw);
 if ($__wa !== '') {
     if (preg_match('#^https?://#i', $__wa))      $supportWaUrl = $__wa;
     elseif (stripos($__wa, 'wa.me/') === 0)     $supportWaUrl = 'https://' . $__wa;
@@ -197,9 +187,9 @@ $inrExchangeRate = max(1.0, (float)($settings['inr_rate'] ?? 88.0));
 
 $maintenanceTgLink = !empty($settings['maintenance_telegram_link']) 
     ? $settings['maintenance_telegram_link'] 
-    : $tenantTelegram;
+    : $supTgRaw;
 
-$effectiveTutorialLink = $tenantTelegram;
+$effectiveTutorialLink = $supTgRaw;
 
 // 🔐 মেইন স্টোরের Firebase/Google কনফিগ (সাব-ডোমেইনে নিজের না থাকলে এটা দিয়ে Gmail লগইন হয়)
 $mainFirebaseCfg = [];
@@ -256,12 +246,12 @@ $globalAppDownloadUrl = !empty($settings['app_download_url']) ? $settings['app_d
 // সব অ্যামাউন্ট BDT তে। রিটার্ন: ['ok'=>bool, 'message'=>..., 'discount_bdt'=>..., 'coupon'=>row]
 // ====================================================================
 if (!function_exists('vpValidateCoupon')) {
-    function vpValidateCoupon(PDO $pdo, string $code, int $subId, int $userId, string $role, int $productId, float $amountBdt): array {
+    function vpValidateCoupon(PDO $pdo, string $code, int $userId, string $role, int $productId, float $amountBdt): array {
         $code = strtoupper(trim($code));
         if ($code === '') return ['ok' => false, 'message' => 'Please enter a coupon code!'];
         try {
-            $st = $pdo->prepare("SELECT * FROM coupons WHERE UPPER(code) = ? AND subdomain_id = ? LIMIT 1");
-            $st->execute([$code, $subId]);
+            $st = $pdo->prepare("SELECT * FROM coupons WHERE UPPER(code) = ? LIMIT 1");
+            $st->execute([$code]);
             $c = $st->fetch(PDO::FETCH_ASSOC);
         } catch (Throwable $e) { $c = false; }
         if (!$c || (int)($c['is_active'] ?? 1) !== 1) return ['ok' => false, 'message' => 'Invalid coupon code!'];
@@ -319,11 +309,11 @@ if (!function_exists('vpValidateCoupon')) {
     }
 }
 if (!function_exists('vpRecordCouponUse')) {
-    function vpRecordCouponUse(PDO $pdo, array $coupon, int $subId, int $userId, int $productId, float $discBdt, float $orderBdt): void {
+    function vpRecordCouponUse(PDO $pdo, array $coupon, int $userId, int $productId, float $discBdt, float $orderBdt): void {
         try {
             $pdo->prepare("UPDATE coupons SET used_count = used_count + 1 WHERE id = ?")->execute([(int)$coupon['id']]);
-            $pdo->prepare("INSERT INTO coupon_usages (coupon_id, subdomain_id, user_id, product_id, discount_bdt, order_total_bdt) VALUES (?, ?, ?, ?, ?, ?)")
-                ->execute([(int)$coupon['id'], $subId, $userId, $productId, $discBdt, $orderBdt]);
+            $pdo->prepare("INSERT INTO coupon_usages (coupon_id, user_id, product_id, discount_bdt, order_total_bdt) VALUES (?, ?, ?, ?, ?)")
+                ->execute([(int)$coupon['id'], $userId, $productId, $discBdt, $orderBdt]);
         } catch (Throwable $e) {}
     }
 }
@@ -452,9 +442,9 @@ if (!function_exists('vpSnzPayEnabled')) {
 }
 if (!function_exists('vpSaveManualOrder')) {
     // ম্যানুয়াল অর্ডার: প্ল্যান/পরিমাণ সহ pending ট্রানজেকশন — অ্যাডমিন Approve করলে কি ডেলিভারি হবে, ব্যালেন্সে টাকা যোগ হবে না
-    function vpSaveManualOrder(PDO $pdo, int $userId, int $subId, string $method, float $amountUsd, string $sender, string $trxId, int $planId, int $qty, string $coupon = ''): void {
-        $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status, subdomain_id, tx_type, order_plan_id, order_qty, order_coupon) VALUES (?, ?, ?, 0.00, ?, ?, 'pending', ?, 'order', ?, ?, ?)")
-            ->execute([$userId, $method, $amountUsd, $sender, $trxId, $subId, $planId, max(1, $qty), $coupon !== '' ? $coupon : null]);
+    function vpSaveManualOrder(PDO $pdo, int $userId, string $method, float $amountUsd, string $sender, string $trxId, int $planId, int $qty, string $coupon = ''): void {
+        $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status, tx_type, order_plan_id, order_qty, order_coupon) VALUES (?, ?, ?, 0.00, ?, ?, 'pending', 'order', ?, ?, ?)")
+            ->execute([$userId, $method, $amountUsd, $sender, $trxId, $planId, max(1, $qty), $coupon !== '' ? $coupon : null]);
     }
 }
 if (!function_exists('vpRestoreStock')) {
@@ -621,8 +611,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
         $targetName  = $verified['name'] !== '' ? $verified['name'] : explode('@', $targetEmail)[0];
         $firebaseUid = $verified['uid'];
 
-        $stmtChk = $pdo->prepare("SELECT * FROM users WHERE email = ? AND subdomain_id = ? LIMIT 1");
-        $stmtChk->execute([$targetEmail, $currentSubdomainId]);
+        $stmtChk = $pdo->prepare("SELECT * FROM users WHERE email = ? LIMIT 1");
+        $stmtChk->execute([$targetEmail]);
         $rowUser = $stmtChk->fetch(PDO::FETCH_ASSOC);
 
         if ($rowUser) {
@@ -638,8 +628,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
             $_SESSION['auth_user_id']      = (int)$rowUser['id'];
             $_SESSION['user_id']           = (int)$rowUser['id'];
             $_SESSION['auth_username']     = $rowUser['username'];
-            $_SESSION['auth_subdomain_id'] = $currentSubdomainId;
-            $_SESSION['vp_auth'][$currentSubdomainId] = (int)$_SESSION['auth_user_id']; // প্রতিটা স্টোরের আলাদা লগইন
 
             echo json_encode(['status' => 'success', 'message' => 'Welcome back, ' . htmlspecialchars($rowUser['username']) . '!']);
             exit;
@@ -649,8 +637,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
                 $cleanName = 'user_' . substr(md5(uniqid()), 0, 5);
             }
 
-            $stmtUCheck = $pdo->prepare("SELECT id FROM users WHERE username = ? AND subdomain_id = ? LIMIT 1");
-            $stmtUCheck->execute([$cleanName, $currentSubdomainId]);
+            $stmtUCheck = $pdo->prepare("SELECT id FROM users WHERE username = ? LIMIT 1");
+            $stmtUCheck->execute([$cleanName]);
             if ($stmtUCheck->fetchColumn()) {
                 $cleanName .= '_' . rand(100, 999);
             }
@@ -665,13 +653,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
             $refBonusBdt = 0;
             if (!empty($refCode)) {
                 try {
-                    $stmtRef = $pdo->prepare("SELECT id FROM users WHERE referral_code = ? AND subdomain_id = ? LIMIT 1");
-                    $stmtRef->execute([strtoupper($refCode), $currentSubdomainId]);
+                    $stmtRef = $pdo->prepare("SELECT id FROM users WHERE referral_code = ? LIMIT 1");
+                    $stmtRef->execute([strtoupper($refCode)]);
                     $referredBy = (int)$stmtRef->fetchColumn();
 
                     if ($referredBy > 0) {
-                        $stmtRS = $pdo->prepare("SELECT * FROM referral_settings WHERE subdomain_id = ? LIMIT 1");
-                        $stmtRS->execute([$currentSubdomainId]);
+                        $stmtRS = $pdo->prepare("SELECT * FROM referral_settings  LIMIT 1");
+                        $stmtRS->execute([]);
                         $refSettings = $stmtRS->fetch(PDO::FETCH_ASSOC);
                         if ($refSettings && (int)$refSettings['is_active'] === 1) {
                             $refTokens = (int)$refSettings['token_per_referral'];
@@ -693,16 +681,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
 
             try {
                 $stmtIns = $pdo->prepare("INSERT INTO users 
-                    (username, email, password, role, balance, coins, status, created_by, subdomain_id, created_by_subdomain, firebase_uid, referral_code, referred_by, created_at) 
-                    VALUES (?, ?, ?, 'customer', 0.00, 0, 'active', ?, ?, ?, ?, ?, ?, NOW())");
-                $stmtIns->execute([$cleanName, $targetEmail, $randomPass, $assignedCreator, $currentSubdomainId, $currentSubdomainSlug, $firebaseUid ?: null, $newReferralCode, $referredBy]);
+                    (username, email, password, role, balance, coins, status, created_by, firebase_uid, referral_code, referred_by, created_at) 
+                    VALUES (?, ?, ?, 'customer', 0.00, 0, 'active', ?, ?, ?, ?, NOW())");
+                $stmtIns->execute([$cleanName, $targetEmail, $randomPass, $assignedCreator, $firebaseUid ?: null, $newReferralCode, $referredBy]);
                 $newId = (int)$pdo->lastInsertId();
 
                 $_SESSION['auth_user_id']      = $newId;
                 $_SESSION['user_id']           = $newId;
                 $_SESSION['auth_username']     = $cleanName;
-                $_SESSION['auth_subdomain_id'] = $currentSubdomainId;
-                $_SESSION['vp_auth'][$currentSubdomainId] = (int)$_SESSION['auth_user_id']; // প্রতিটা স্টোরের আলাদা লগইন
 
                 echo json_encode(['status' => 'success', 'message' => 'Account created on this store! Welcome, ' . $cleanName]);
                 exit;
@@ -723,8 +709,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
             exit;
         }
 
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE (username = ? OR email = ?) AND subdomain_id = ? LIMIT 1");
-        $stmt->execute([$loginInput, $loginInput, $currentSubdomainId]);
+        // 🔐 config.php এর ADMIN_USERNAME / ADMIN_PASSWORD দিয়ে লগইন করলে সরাসরি অ্যাডমিন প্যানেলে যাবে
+        if (defined('ADMIN_USERNAME') && defined('ADMIN_PASSWORD') && hash_equals((string)ADMIN_USERNAME, $loginInput)) {
+            $__ap = (string)ADMIN_PASSWORD;
+            $__ok = preg_match('/^\$(2y|2a|argon2id?)\$/', $__ap) ? password_verify($password, $__ap) : hash_equals($__ap, $password);
+            if ($__ok) {
+                session_regenerate_id(true);
+                $_SESSION['admin_auth'] = true;
+                $_SESSION['admin_user'] = $loginInput;
+                header('Location: admin.php');
+                exit;
+            }
+        }
+
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE (username = ? OR email = ?) LIMIT 1");
+        $stmt->execute([$loginInput, $loginInput]);
         $rowUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($rowUser && (password_verify($password, $rowUser['password']) || $password === $rowUser['password'])) {
@@ -737,8 +736,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
             $_SESSION['auth_user_id']      = (int)$rowUser['id'];
             $_SESSION['user_id']           = (int)$rowUser['id'];
             $_SESSION['auth_username']     = $rowUser['username'];
-            $_SESSION['auth_subdomain_id'] = $currentSubdomainId;
-            $_SESSION['vp_auth'][$currentSubdomainId] = (int)$_SESSION['auth_user_id']; // প্রতিটা স্টোরের আলাদা লগইন
             $_SESSION['flash_toast']       = ['type' => 'success', 'msg' => 'Welcome back, ' . htmlspecialchars($rowUser['username']) . '!'];
             header('Location: index.php');
             exit;
@@ -766,8 +763,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
             exit;
         }
 
-        $stmtChk = $pdo->prepare("SELECT id FROM users WHERE username = ? AND subdomain_id = ? LIMIT 1");
-        $stmtChk->execute([$username, $currentSubdomainId]);
+        $stmtChk = $pdo->prepare("SELECT id FROM users WHERE username = ? LIMIT 1");
+        $stmtChk->execute([$username]);
         if ($stmtChk->fetchColumn()) {
             $_SESSION['flash_toast'] = ['type' => 'error', 'msg' => 'Username is already taken on this store!'];
             header('Location: index.php');
@@ -775,8 +772,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
         }
 
         if (!empty($email)) {
-            $stmtChkE = $pdo->prepare("SELECT id FROM users WHERE email = ? AND subdomain_id = ? LIMIT 1");
-            $stmtChkE->execute([$email, $currentSubdomainId]);
+            $stmtChkE = $pdo->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
+            $stmtChkE->execute([$email]);
             if ($stmtChkE->fetchColumn()) {
                 $_SESSION['flash_toast'] = ['type' => 'error', 'msg' => 'Email already registered on this store! Please log in.'];
                 header('Location: index.php');
@@ -791,13 +788,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
         $referredBy = 0;
         if (!empty($refCode)) {
             try {
-                $stmtRef = $pdo->prepare("SELECT id FROM users WHERE referral_code = ? AND subdomain_id = ? LIMIT 1");
-                $stmtRef->execute([strtoupper($refCode), $currentSubdomainId]);
+                $stmtRef = $pdo->prepare("SELECT id FROM users WHERE referral_code = ? LIMIT 1");
+                $stmtRef->execute([strtoupper($refCode)]);
                 $referredBy = (int)$stmtRef->fetchColumn();
 
                 if ($referredBy > 0) {
-                    $stmtRS = $pdo->prepare("SELECT * FROM referral_settings WHERE subdomain_id = ? LIMIT 1");
-                    $stmtRS->execute([$currentSubdomainId]);
+                    $stmtRS = $pdo->prepare("SELECT * FROM referral_settings  LIMIT 1");
+                    $stmtRS->execute([]);
                     $refSettings = $stmtRS->fetch(PDO::FETCH_ASSOC);
                     if ($refSettings && (int)$refSettings['is_active'] === 1) {
                         $refTokens = (int)$refSettings['token_per_referral'];
@@ -818,16 +815,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
 
         try {
             $stmtIns = $pdo->prepare("INSERT INTO users 
-                (username, email, password, role, balance, coins, status, created_by, subdomain_id, created_by_subdomain, referral_code, referred_by, created_at) 
-                VALUES (?, ?, ?, 'customer', 0.00, 0, 'active', ?, ?, ?, ?, ?, NOW())");
-            $stmtIns->execute([$username, $email ?: null, $hashedPass, $assignedCreator, $currentSubdomainId, $currentSubdomainSlug, $newReferralCode, $referredBy]);
+                (username, email, password, role, balance, coins, status, created_by, referral_code, referred_by, created_at) 
+                VALUES (?, ?, ?, 'customer', 0.00, 0, 'active', ?, ?, ?, NOW())");
+            $stmtIns->execute([$username, $email ?: null, $hashedPass, $assignedCreator, $newReferralCode, $referredBy]);
             $newId = (int)$pdo->lastInsertId();
 
             $_SESSION['auth_user_id']      = $newId;
             $_SESSION['user_id']           = $newId;
             $_SESSION['auth_username']     = $username;
-            $_SESSION['auth_subdomain_id'] = $currentSubdomainId;
-            $_SESSION['vp_auth'][$currentSubdomainId] = (int)$_SESSION['auth_user_id']; // প্রতিটা স্টোরের আলাদা লগইন
             $_SESSION['flash_toast']       = ['type' => 'success', 'msg' => 'Registration successful! Welcome to store.'];
             header('Location: index.php');
             exit;
@@ -843,21 +838,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
 // 6. USER INTEGRITY & RATE RESOLUTION (STRICT DOMAIN SCOPE)
 // ====================================================================
 // 🔒 প্রতিটা স্টোর (মেইন/সাব-ডোমেইন) এর লগইন আলাদা — এক স্টোরে গেলে অন্য স্টোর থেকে লগআউট হবে না
-$vpAuthMap  = (isset($_SESSION['vp_auth']) && is_array($_SESSION['vp_auth'])) ? $_SESSION['vp_auth'] : [];
-$userId     = (int)($vpAuthMap[$currentSubdomainId] ?? 0);
-if ($userId <= 0) {
-    $legacySub = $_SESSION['auth_subdomain_id'] ?? null;
-    if ($legacySub === null || (int)$legacySub === $currentSubdomainId) {
-        $userId = (int)($_SESSION['auth_user_id'] ?? $_SESSION['user_id'] ?? 0);
-    }
-}
+$userId     = (int)($_SESSION['auth_user_id'] ?? $_SESSION['user_id'] ?? 0);
 $user       = null;
 $isLoggedIn = false;
 
 if ($userId > 0) {
     try {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? AND subdomain_id = ? LIMIT 1");
-        $stmt->execute([$userId, $currentSubdomainId]);
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? LIMIT 1");
+        $stmt->execute([$userId]);
         $fetchedUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($fetchedUser && ($fetchedUser['status'] ?? 'active') === 'active') {
@@ -872,11 +860,7 @@ if ($userId > 0) {
                 } catch (Throwable $e) {}
             }
         } else {
-            // শুধু এই স্টোরের লগইন মুছবে (অন্য স্টোরের লগইন ঠিক থাকবে)
-            unset($_SESSION['vp_auth'][$currentSubdomainId]);
-            if ((int)($_SESSION['auth_subdomain_id'] ?? $currentSubdomainId) === $currentSubdomainId) {
-                unset($_SESSION['auth_user_id'], $_SESSION['user_id'], $_SESSION['auth_username'], $_SESSION['auth_subdomain_id']);
-            }
+            unset($_SESSION['auth_user_id'], $_SESSION['user_id'], $_SESSION['auth_username']);
             $userId = 0;
         }
     } catch (Throwable $e) {
@@ -934,8 +918,7 @@ try {
         $stmtDCP = $pdo->query("SELECT ucp.plan_id, MIN(ucp.custom_price) 
             FROM user_custom_prices ucp
             JOIN users u ON u.id = ucp.user_id
-            WHERE (u.subdomain_id = 0 OR u.subdomain_id IS NULL OR u.subdomain_id = '') 
-              AND (u.role = 'customer' OR u.role IS NULL OR u.role = '')
+            WHERE (u.role = 'customer' OR u.role IS NULL OR u.role = '')
             GROUP BY ucp.plan_id");
         if ($stmtDCP && is_object($stmtDCP)) {
             $defaultCustomerPrices = $stmtDCP->fetchAll(PDO::FETCH_KEY_PAIR);
@@ -947,8 +930,8 @@ try {
 // 7. KEY MANAGER REST HANDLER
 // ====================================================================
 if (!function_exists('generateFromExternalProvider')) {
-    function generateFromExternalProvider($apiPlanId, $quantity = 1, ?array $tenantContext = null) {
-        global $pdo, $settings, $currentSubdomainId;
+    function generateFromExternalProvider($apiPlanId, $quantity = 1) {
+        global $pdo, $settings;
         
         $planIdInt = (int)$apiPlanId;
         $qtyInt    = max(1, min(100, (int)$quantity));
@@ -1062,7 +1045,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'apply_coupon') {
         exit;
     }
 
-    $cv = vpValidateCoupon($pdo, $couponCode, $currentSubdomainId, (int)($user['id'] ?? 0), $userRole, $productId, $planPrice);
+    $cv = vpValidateCoupon($pdo, $couponCode, (int)($user['id'] ?? 0), $userRole, $productId, $planPrice);
     if (!$cv['ok']) {
         echo json_encode(['status' => 'error', 'message' => $cv['message']]);
         exit;
@@ -1117,8 +1100,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
         exit;
     }
 
-    $stmtChkTrx = $pdo->prepare("SELECT id, status FROM transactions WHERE UPPER(trx_id) = ? AND subdomain_id = ? LIMIT 1");
-    $stmtChkTrx->execute([$trxId, $currentSubdomainId]);
+    $stmtChkTrx = $pdo->prepare("SELECT id, status FROM transactions WHERE UPPER(trx_id) = ? LIMIT 1");
+    $stmtChkTrx->execute([$trxId]);
     $existingTrx = $stmtChkTrx->fetch(PDO::FETCH_ASSOC);
 
     if ($existingTrx) {
@@ -1131,13 +1114,13 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
 
     $methodRow = null;
     if ($methodId > 0) {
-        $stmtM = $pdo->prepare("SELECT * FROM payment_methods WHERE id = ? AND subdomain_id = ? AND is_active = 1 LIMIT 1");
-        $stmtM->execute([$methodId, $currentSubdomainId]);
+        $stmtM = $pdo->prepare("SELECT * FROM payment_methods WHERE id = ? AND is_active = 1 LIMIT 1");
+        $stmtM->execute([$methodId]);
         $methodRow = $stmtM->fetch(PDO::FETCH_ASSOC);
     }
     if (!$methodRow) {
-        $stmtM = $pdo->prepare("SELECT * FROM payment_methods WHERE LOWER(method_key) = ? AND subdomain_id = ? AND is_active = 1 LIMIT 1");
-        $stmtM->execute([$methodKey, $currentSubdomainId]);
+        $stmtM = $pdo->prepare("SELECT * FROM payment_methods WHERE LOWER(method_key) = ? AND is_active = 1 LIMIT 1");
+        $stmtM->execute([$methodKey]);
         $methodRow = $stmtM->fetch(PDO::FETCH_ASSOC);
     }
 
@@ -1150,11 +1133,10 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
                                   pl.api_plan_id, pl.reward_coins, pl.coin_price 
                            FROM product_plans pl 
                            JOIN products p ON pl.product_id = p.id 
-                           WHERE pl.id = ? 
-                             AND p.subdomain_id = ?
+                           WHERE pl.id = ?
                              AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
                            LIMIT 1");
-    $stmt->execute([$planId, $currentSubdomainId]);
+    $stmt->execute([$planId]);
     $plan = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$plan || (int)($plan['is_active'] ?? 1) === 0) {
@@ -1195,7 +1177,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
     // 🎟️ কুপন (আসল পেমেন্টে)
     $vpCouponApplied = null; $vpCouponDisc = 0.0; $vpOrderBdtBeforeCoupon = $totalCostBdt;
     if (trim($_POST['coupon_code'] ?? '') !== '') {
-        $cv = vpValidateCoupon($pdo, (string)$_POST['coupon_code'], $currentSubdomainId, (int)$user['id'], $userRole, (int)$plan['real_product_id'], (float)$totalCostBdt);
+        $cv = vpValidateCoupon($pdo, (string)$_POST['coupon_code'], (int)$user['id'], $userRole, (int)$plan['real_product_id'], (float)$totalCostBdt);
         if (!$cv['ok']) { echo json_encode(['status' => 'error', 'message' => '🎟️ ' . $cv['message']]); exit; }
         $vpCouponApplied = $cv['coupon']; $vpCouponDisc = (float)$cv['discount_bdt'];
         $totalCostBdt = max(1, round($totalCostBdt - $vpCouponDisc, 0));
@@ -1210,9 +1192,9 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
 
     try {
         $stmtGW = $pdo->prepare("SELECT * FROM gateway_transactions 
-            WHERE UPPER(trx_id) = ? AND subdomain_id = ? AND status = 'unclaimed' 
+            WHERE UPPER(trx_id) = ? AND status = 'unclaimed' 
             ORDER BY id DESC LIMIT 1");
-        $stmtGW->execute([$trxId, $currentSubdomainId]);
+        $stmtGW->execute([$trxId]);
         $gwTrx = $stmtGW->fetch(PDO::FETCH_ASSOC);
 
         if ($gwTrx) {
@@ -1259,7 +1241,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
         $amountInUsd = round($totalCostBdt / $effectiveBdtRate, 4);
         try {
             // 🛡️ অর্ডারের প্ল্যান/পরিমাণ সেভ হয় — অ্যাডমিন Approve করলে কি ডেলিভারি হবে (আগে ভুল করে ব্যালেন্সে টাকা যোগ হত)
-            vpSaveManualOrder($pdo, (int)$user['id'], $currentSubdomainId, $methodDisplayName . ' (Manual Order)', $amountInUsd, $senderNum ?: 'N/A', $trxId, $planId, $quantity, $vpCouponApplied['code'] ?? '');
+            vpSaveManualOrder($pdo, (int)$user['id'], $methodDisplayName . ' (Manual Order)', $amountInUsd, $senderNum ?: 'N/A', $trxId, $planId, $quantity, $vpCouponApplied['code'] ?? '');
 
             echo json_encode([
                 'status'        => 'pending_submitted',
@@ -1278,8 +1260,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
     $generatedKeys = [];
     $cleanQty      = (int)$quantity;
 
-    $stmtStock = $pdo->prepare("SELECT id, license_key FROM stock_keys WHERE plan_id = ? AND status = 'available' AND subdomain_id = ? ORDER BY id ASC LIMIT $cleanQty");
-    $stmtStock->execute([$planId, $currentSubdomainId]);
+    $stmtStock = $pdo->prepare("SELECT id, license_key FROM stock_keys WHERE plan_id = ? AND status = 'available' ORDER BY id ASC LIMIT $cleanQty");
+    $stmtStock->execute([$planId]);
     $stockRows = $stmtStock ? $stmtStock->fetchAll(PDO::FETCH_ASSOC) : [];
 
     if (count($stockRows) === $cleanQty) {
@@ -1292,7 +1274,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
         $apiPlanId   = (int)($plan['api_plan_id'] ?? 0);
         $targetApiId = $apiPlanId > 0 ? $apiPlanId : $planId;
 
-        $apiResult = generateFromExternalProvider($targetApiId, $quantity, null);
+        $apiResult = generateFromExternalProvider($targetApiId, $quantity);
 
         if ($apiResult['status'] === 'success' && !empty($apiResult['keys'])) {
             $generatedKeys = (array)$apiResult['keys'];
@@ -1301,17 +1283,17 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
 
             $pdo->beginTransaction();
             try {
-                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ? AND subdomain_id = ?")
-                    ->execute([$amountToCreditUsd, $user['id'], $currentSubdomainId]);
+                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")
+                    ->execute([$amountToCreditUsd, $user['id']]);
 
-                $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status, subdomain_id) VALUES (?, ?, ?, 0.00, ?, ?, 'approved', ?)")
-                    ->execute([$user['id'], $methodDisplayName . ' (Refund to Main Balance)', $amountToCreditUsd, $senderNum ?: 'Trx Verified', $trxId, $currentSubdomainId]);
+                $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status) VALUES (?, ?, ?, 0.00, ?, ?, 'approved')")
+                    ->execute([$user['id'], $methodDisplayName . ' (Refund to Main Balance)', $amountToCreditUsd, $senderNum ?: 'Trx Verified', $trxId]);
                 if (!empty($gwTrx['id'])) { $pdo->prepare("UPDATE gateway_transactions SET status = 'claimed' WHERE id = ?")->execute([(int)$gwTrx['id']]); }
 
                 $pdo->commit();
 
-                $stmtNewBal = $pdo->prepare("SELECT balance FROM users WHERE id = ? AND subdomain_id = ?");
-                $stmtNewBal->execute([$user['id'], $currentSubdomainId]);
+                $stmtNewBal = $pdo->prepare("SELECT balance FROM users WHERE id = ?");
+                $stmtNewBal->execute([$user['id']]);
                 $newBalBdt = round((float)$stmtNewBal->fetchColumn() * $effectiveBdtRate, 0);
 
 
@@ -1333,12 +1315,12 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
     try {
         $amountInUsd = round($verifiedAmountBdt / $effectiveBdtRate, 2);
 
-        $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status, subdomain_id) VALUES (?, ?, ?, 0.00, ?, ?, 'approved', ?)")
-            ->execute([$user['id'], $methodDisplayName . ' (Trx Verified)', $amountInUsd, $senderNum ?: 'N/A', $trxId, $currentSubdomainId]);
+        $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status) VALUES (?, ?, ?, 0.00, ?, ?, 'approved')")
+            ->execute([$user['id'], $methodDisplayName . ' (Trx Verified)', $amountInUsd, $senderNum ?: 'N/A', $trxId]);
 
         if ($totalRewardCoins > 0) {
-            $pdo->prepare("UPDATE users SET coins = coins + ? WHERE id = ? AND subdomain_id = ?")
-                ->execute([$totalRewardCoins, $user['id'], $currentSubdomainId]);
+            $pdo->prepare("UPDATE users SET coins = coins + ? WHERE id = ?")
+                ->execute([$totalRewardCoins, $user['id']]);
         }
 
         // Spin progress calculation (per 500 BDT)
@@ -1353,25 +1335,25 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
             ->execute([$totalCostBdt, $spinsEarned, $user['id']]);
 
         $sourceLabel = 'MAIN';
-        $stmtInsert  = $pdo->prepare("INSERT INTO licenses (user_id, product_id, plan_id, license_key, validity, price, source, payment_type, subdomain_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'direct_pay', ?)");
+        $stmtInsert  = $pdo->prepare("INSERT INTO licenses (user_id, product_id, plan_id, license_key, validity, price, source, payment_type) VALUES (?, ?, ?, ?, ?, ?, ?, 'direct_pay')");
 
         foreach ($generatedKeys as $key) {
-            $stmtInsert->execute([$user['id'], (int)$plan['real_product_id'], $planId, (string)$key, $productFullName, $unitPrice, $sourceLabel, $currentSubdomainId]);
+            $stmtInsert->execute([$user['id'], (int)$plan['real_product_id'], $planId, (string)$key, $productFullName, $unitPrice, $sourceLabel]);
         }
 
         // Live Purchase Feed Entry (masked)
         try {
-            $pdo->prepare("INSERT INTO live_purchase_feed (subdomain_id, masked_username, product_name, amount_bdt) VALUES (?, ?, ?, ?)")
-                ->execute([$currentSubdomainId, maskUsername($user['username']), $productFullName, $totalCostBdt]);
+            $pdo->prepare("INSERT INTO live_purchase_feed (masked_username, product_name, amount_bdt) VALUES ( ?, ?, ?)")
+                ->execute([ maskUsername($user['username']), $productFullName, $totalCostBdt]);
         } catch (Throwable $e) {}
 
-        if ($vpCouponApplied) vpRecordCouponUse($pdo, $vpCouponApplied, $currentSubdomainId, (int)$user['id'], (int)$plan['real_product_id'], $vpCouponDisc, (float)$vpOrderBdtBeforeCoupon);
+        if ($vpCouponApplied) vpRecordCouponUse($pdo, $vpCouponApplied, (int)$user['id'], (int)$plan['real_product_id'], $vpCouponDisc, (float)$vpOrderBdtBeforeCoupon);
         if (!empty($gwTrx['id'])) { $pdo->prepare("UPDATE gateway_transactions SET status = 'claimed' WHERE id = ?")->execute([(int)$gwTrx['id']]); }
 
         $pdo->commit();
 
-        $stmtNewBal = $pdo->prepare("SELECT balance, coins FROM users WHERE id = ? AND subdomain_id = ?");
-        $stmtNewBal->execute([$user['id'], $currentSubdomainId]);
+        $stmtNewBal = $pdo->prepare("SELECT balance, coins FROM users WHERE id = ?");
+        $stmtNewBal->execute([$user['id']]);
         $refreshed = $stmtNewBal->fetch(PDO::FETCH_ASSOC);
 
         $newBalBdt   = round((float)$refreshed['balance'] * $effectiveBdtRate, 0);
@@ -1427,8 +1409,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_add_fund')
         exit;
     }
 
-    $stmtChk = $pdo->prepare("SELECT id FROM transactions WHERE UPPER(trx_id) = ? AND subdomain_id = ? LIMIT 1");
-    $stmtChk->execute([$trxId, $currentSubdomainId]);
+    $stmtChk = $pdo->prepare("SELECT id FROM transactions WHERE UPPER(trx_id) = ? LIMIT 1");
+    $stmtChk->execute([$trxId]);
     if ($stmtChk->fetch()) {
         echo json_encode(['status' => 'error', 'message' => 'This Transaction ID (TrxID) is already recorded on this store!']);
         exit;
@@ -1436,13 +1418,13 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_add_fund')
 
     $methodRow = null;
     if ($methodId > 0) {
-        $stmtM = $pdo->prepare("SELECT * FROM payment_methods WHERE id = ? AND subdomain_id = ? AND is_active = 1 AND allow_add_fund = 1 LIMIT 1");
-        $stmtM->execute([$methodId, $currentSubdomainId]);
+        $stmtM = $pdo->prepare("SELECT * FROM payment_methods WHERE id = ? AND is_active = 1 AND allow_add_fund = 1 LIMIT 1");
+        $stmtM->execute([$methodId]);
         $methodRow = $stmtM->fetch(PDO::FETCH_ASSOC);
     }
     if (!$methodRow) {
-        $stmtM = $pdo->prepare("SELECT * FROM payment_methods WHERE LOWER(method_key) = ? AND subdomain_id = ? AND is_active = 1 AND allow_add_fund = 1 LIMIT 1");
-        $stmtM->execute([$methodKey, $currentSubdomainId]);
+        $stmtM = $pdo->prepare("SELECT * FROM payment_methods WHERE LOWER(method_key) = ? AND is_active = 1 AND allow_add_fund = 1 LIMIT 1");
+        $stmtM->execute([$methodKey]);
         $methodRow = $stmtM->fetch(PDO::FETCH_ASSOC);
     }
 
@@ -1470,9 +1452,9 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_add_fund')
 
     try {
         $stmtGW = $pdo->prepare("SELECT * FROM gateway_transactions 
-            WHERE UPPER(trx_id) = ? AND subdomain_id = ? AND status = 'unclaimed' 
+            WHERE UPPER(trx_id) = ? AND status = 'unclaimed' 
             ORDER BY id DESC LIMIT 1");
-        $stmtGW->execute([$trxId, $currentSubdomainId]);
+        $stmtGW->execute([$trxId]);
         $gw = $stmtGW->fetch(PDO::FETCH_ASSOC);
 
         if ($gw) {
@@ -1523,17 +1505,17 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_add_fund')
         $totalCreditUsd = $amountInUsd + $bonusInUsd;
 
         if ($autoApproved) {
-            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ? AND subdomain_id = ?")
-                ->execute([$totalCreditUsd, $user['id'], $currentSubdomainId]);
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")
+                ->execute([$totalCreditUsd, $user['id']]);
         }
 
-        $stmtInsTrx = $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status, subdomain_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmtInsTrx->execute([$user['id'], $methodDisplayName, $amountInUsd, $calculatedBonus, $senderNum ?: 'N/A', $trxId, $status, $currentSubdomainId]);
+        $stmtInsTrx = $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmtInsTrx->execute([$user['id'], $methodDisplayName, $amountInUsd, $calculatedBonus, $senderNum ?: 'N/A', $trxId, $status]);
 
         $pdo->commit();
 
-        $stmtNewBal = $pdo->prepare("SELECT balance FROM users WHERE id = ? AND subdomain_id = ?");
-        $stmtNewBal->execute([$user['id'], $currentSubdomainId]);
+        $stmtNewBal = $pdo->prepare("SELECT balance FROM users WHERE id = ?");
+        $stmtNewBal->execute([$user['id']]);
         $newBalBdt = round((float)$stmtNewBal->fetchColumn() * $effectiveBdtRate, 0);
 
 
@@ -1594,11 +1576,10 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
                                   pl.api_plan_id, pl.reward_coins, pl.coin_price 
                            FROM product_plans pl 
                            JOIN products p ON pl.product_id = p.id 
-                           WHERE pl.id = ? 
-                             AND p.subdomain_id = ?
+                           WHERE pl.id = ?
                              AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
                            LIMIT 1");
-    $stmt->execute([$planId, $currentSubdomainId]);
+    $stmt->execute([$planId]);
     $plan = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$plan || (int)($plan['is_active'] ?? 1) === 0) {
@@ -1646,7 +1627,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
     $vpCouponApplied = null; $vpCouponDisc = 0.0; $vpOrderBdtBeforeCoupon = round($totalCost * $effectiveBdtRate, 0);
     $appliedCoupon = trim($_POST['coupon_code'] ?? '');
     if ($appliedCoupon !== '' && $paymentType !== 'coins') {
-        $cv = vpValidateCoupon($pdo, $appliedCoupon, $currentSubdomainId, (int)$user['id'], $userRole, (int)$plan['real_product_id'], (float)$vpOrderBdtBeforeCoupon);
+        $cv = vpValidateCoupon($pdo, $appliedCoupon, (int)$user['id'], $userRole, (int)$plan['real_product_id'], (float)$vpOrderBdtBeforeCoupon);
         if (!$cv['ok']) { echo json_encode(['status' => 'error', 'message' => '🎟️ ' . $cv['message']]); exit; }
         $vpCouponApplied = $cv['coupon']; $vpCouponDisc = (float)$cv['discount_bdt'];
         $totalCost = max(0.01, round(($vpOrderBdtBeforeCoupon - $vpCouponDisc) / max(1.0, $effectiveBdtRate), 4));
@@ -1670,8 +1651,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
             exit;
         }
 
-        $stmtChkTrx = $pdo->prepare("SELECT id FROM transactions WHERE UPPER(trx_id) = ? AND subdomain_id = ? LIMIT 1");
-        $stmtChkTrx->execute([$directTrxId, $currentSubdomainId]);
+        $stmtChkTrx = $pdo->prepare("SELECT id FROM transactions WHERE UPPER(trx_id) = ? LIMIT 1");
+        $stmtChkTrx->execute([$directTrxId]);
         if ($stmtChkTrx->fetch()) {
             echo json_encode(['status' => 'error', 'message' => 'This Transaction ID is already recorded on this store!']);
             exit;
@@ -1693,7 +1674,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
             }
         } else {
             // অটো ভেরিফাই বন্ধ → অর্ডার অ্যাডমিনের কাছে রিভিউতে যাবে (কোনো কি বা ব্যালেন্স যোগ হবে না)
-            vpSaveManualOrder($pdo, (int)$user['id'], $currentSubdomainId, 'Binance (Manual Order)', $amountInUsd, $directSender ?: 'Binance', $directTrxId, $planId, $quantity, $vpCouponApplied['code'] ?? '');
+            vpSaveManualOrder($pdo, (int)$user['id'], 'Binance (Manual Order)', $amountInUsd, $directSender ?: 'Binance', $directTrxId, $planId, $quantity, $vpCouponApplied['code'] ?? '');
             echo json_encode([
                 'status'       => 'pending_submitted',
                 'message'      => 'Your Binance order has been submitted for verification. The license will be delivered as soon as admin verifies your payment.',
@@ -1709,8 +1690,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
         }
 
         $totalCoinsNeeded = $coinPricePerItem * $quantity;
-        $stmtUserCoins = $pdo->prepare("SELECT coins FROM users WHERE id = ? AND subdomain_id = ? LIMIT 1");
-        $stmtUserCoins->execute([$user['id'], $currentSubdomainId]);
+        $stmtUserCoins = $pdo->prepare("SELECT coins FROM users WHERE id = ? LIMIT 1");
+        $stmtUserCoins->execute([$user['id']]);
         $currentCoins = (int)$stmtUserCoins->fetchColumn();
 
         if ($currentCoins < $totalCoinsNeeded) {
@@ -1721,8 +1702,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
             exit;
         }
     } else {
-        $stmtBal = $pdo->prepare("SELECT balance FROM users WHERE id = ? AND subdomain_id = ? LIMIT 1");
-        $stmtBal->execute([$user['id'], $currentSubdomainId]);
+        $stmtBal = $pdo->prepare("SELECT balance FROM users WHERE id = ? LIMIT 1");
+        $stmtBal->execute([$user['id']]);
         $currentBalance = (float)$stmtBal->fetchColumn();
 
         if ($currentBalance < $totalCost) {
@@ -1740,8 +1721,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
     $generatedKeys = [];
     $cleanQty      = (int)$quantity;
 
-    $stmtStock = $pdo->prepare("SELECT id, license_key FROM stock_keys WHERE plan_id = ? AND status = 'available' AND subdomain_id = ? ORDER BY id ASC LIMIT $cleanQty");
-    $stmtStock->execute([$planId, $currentSubdomainId]);
+    $stmtStock = $pdo->prepare("SELECT id, license_key FROM stock_keys WHERE plan_id = ? AND status = 'available' ORDER BY id ASC LIMIT $cleanQty");
+    $stmtStock->execute([$planId]);
     $stockRows = $stmtStock ? $stmtStock->fetchAll(PDO::FETCH_ASSOC) : [];
 
     if (count($stockRows) === $cleanQty) {
@@ -1754,20 +1735,20 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
         $apiPlanId   = (int)($plan['api_plan_id'] ?? 0);
         $targetApiId = $apiPlanId > 0 ? $apiPlanId : $planId;
 
-        $apiResult = generateFromExternalProvider($targetApiId, $quantity, null);
+        $apiResult = generateFromExternalProvider($targetApiId, $quantity);
 
         if ($apiResult['status'] === 'success' && !empty($apiResult['keys'])) {
             $generatedKeys = (array)$apiResult['keys'];
         } else {
             if ($paymentType === 'direct_deposit') {
-                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ? AND subdomain_id = ?")
-                    ->execute([$amountInUsd, $user['id'], $currentSubdomainId]);
+                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")
+                    ->execute([$amountInUsd, $user['id']]);
 
-                $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status, subdomain_id) VALUES (?, ?, ?, 0.00, ?, ?, 'approved', ?)")
-                    ->execute([$user['id'], $directMethod . ' (Refund to Wallet)', $amountInUsd, $directSender, $directTrxId, $currentSubdomainId]);
+                $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status) VALUES (?, ?, ?, 0.00, ?, ?, 'approved')")
+                    ->execute([$user['id'], $directMethod . ' (Refund to Wallet)', $amountInUsd, $directSender, $directTrxId]);
 
-                $stmtNewBal = $pdo->prepare("SELECT balance FROM users WHERE id = ? AND subdomain_id = ?");
-                $stmtNewBal->execute([$user['id'], $currentSubdomainId]);
+                $stmtNewBal = $pdo->prepare("SELECT balance FROM users WHERE id = ?");
+                $stmtNewBal->execute([$user['id']]);
                 $newBalBdt = round((float)$stmtNewBal->fetchColumn() * $effectiveBdtRate, 0);
 
 
@@ -1790,16 +1771,16 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
     $pdo->beginTransaction();
     try {
         if ($paymentType === 'direct_deposit') {
-            $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status, subdomain_id) VALUES (?, ?, ?, 0.00, ?, ?, 'approved', ?)")
-                ->execute([$user['id'], $directMethod . ' (Direct Live Pay)', $amountInUsd, $directSender, $directTrxId, $currentSubdomainId]);
+            $pdo->prepare("INSERT INTO transactions (user_id, method, amount, bonus_amount, sender_num, trx_id, status) VALUES (?, ?, ?, 0.00, ?, ?, 'approved')")
+                ->execute([$user['id'], $directMethod . ' (Direct Live Pay)', $amountInUsd, $directSender, $directTrxId]);
 
             if ($totalRewardCoins > 0) {
-                $pdo->prepare("UPDATE users SET coins = coins + ? WHERE id = ? AND subdomain_id = ?")
-                    ->execute([$totalRewardCoins, $user['id'], $currentSubdomainId]);
+                $pdo->prepare("UPDATE users SET coins = coins + ? WHERE id = ?")
+                    ->execute([$totalRewardCoins, $user['id']]);
             }
         } elseif ($paymentType === 'coins') {
-            $stmtDeductCoins = $pdo->prepare("UPDATE users SET coins = coins - ? WHERE id = ? AND subdomain_id = ? AND coins >= ?");
-            $stmtDeductCoins->execute([$totalCoinsNeeded, $user['id'], $currentSubdomainId, $totalCoinsNeeded]);
+            $stmtDeductCoins = $pdo->prepare("UPDATE users SET coins = coins - ? WHERE id = ? AND coins >= ?");
+            $stmtDeductCoins->execute([$totalCoinsNeeded, $user['id'], $totalCoinsNeeded]);
 
             if ($stmtDeductCoins->rowCount() === 0) {
                 $pdo->rollBack();
@@ -1808,8 +1789,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
                 exit;
             }
         } else {
-            $stmtDeduct = $pdo->prepare("UPDATE users SET balance = balance - ?, coins = coins + ? WHERE id = ? AND subdomain_id = ? AND balance >= ?");
-            $stmtDeduct->execute([$totalCost, $totalRewardCoins, $user['id'], $currentSubdomainId, $totalCost]);
+            $stmtDeduct = $pdo->prepare("UPDATE users SET balance = balance - ?, coins = coins + ? WHERE id = ? AND balance >= ?");
+            $stmtDeduct->execute([$totalCost, $totalRewardCoins, $user['id'], $totalCost]);
 
             if ($stmtDeduct->rowCount() === 0) {
                 $pdo->rollBack();
@@ -1835,23 +1816,23 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
         $payLabel    = ($paymentType === 'coins') ? 'coins' : (($paymentType === 'direct_deposit') ? 'direct_pay' : 'balance');
         $priceLogged = ($paymentType === 'coins') ? 0.00 : $unitPrice;
 
-        $stmtInsert  = $pdo->prepare("INSERT INTO licenses (user_id, product_id, plan_id, license_key, validity, price, source, payment_type, subdomain_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmtInsert  = $pdo->prepare("INSERT INTO licenses (user_id, product_id, plan_id, license_key, validity, price, source, payment_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($generatedKeys as $key) {
-            $stmtInsert->execute([$user['id'], (int)$plan['real_product_id'], $planId, (string)$key, $productFullName, $priceLogged, $sourceLabel, $payLabel, $currentSubdomainId]);
+            $stmtInsert->execute([$user['id'], (int)$plan['real_product_id'], $planId, (string)$key, $productFullName, $priceLogged, $sourceLabel, $payLabel]);
         }
 
         // Live Purchase Feed
         try {
-            $pdo->prepare("INSERT INTO live_purchase_feed (subdomain_id, masked_username, product_name, amount_bdt) VALUES (?, ?, ?, ?)")
-                ->execute([$currentSubdomainId, maskUsername($user['username']), $productFullName, $bdtSpent]);
+            $pdo->prepare("INSERT INTO live_purchase_feed (masked_username, product_name, amount_bdt) VALUES ( ?, ?, ?)")
+                ->execute([ maskUsername($user['username']), $productFullName, $bdtSpent]);
         } catch (Throwable $e) {}
 
-        if ($vpCouponApplied) vpRecordCouponUse($pdo, $vpCouponApplied, $currentSubdomainId, (int)$user['id'], (int)$plan['real_product_id'], $vpCouponDisc, (float)$vpOrderBdtBeforeCoupon);
+        if ($vpCouponApplied) vpRecordCouponUse($pdo, $vpCouponApplied, (int)$user['id'], (int)$plan['real_product_id'], $vpCouponDisc, (float)$vpOrderBdtBeforeCoupon);
 
         $pdo->commit();
 
-        $stmtNewBal = $pdo->prepare("SELECT balance, coins FROM users WHERE id = ? AND subdomain_id = ?");
-        $stmtNewBal->execute([$user['id'], $currentSubdomainId]);
+        $stmtNewBal = $pdo->prepare("SELECT balance, coins FROM users WHERE id = ?");
+        $stmtNewBal->execute([$user['id']]);
         $refreshed = $stmtNewBal->fetch(PDO::FETCH_ASSOC);
 
         $newBalBdt   = round((float)$refreshed['balance'] * $effectiveBdtRate, 0);
@@ -1911,15 +1892,15 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'reset_key') {
             echo json_encode(['status' => 'error', 'message' => 'Too many reset requests! Please try again after 1 hour.']);
             exit;
         }
-        $pdo->prepare("INSERT INTO reset_logs (subdomain_id, user_id, product_name, license_key) VALUES (?, ?, ?, ?)")
-            ->execute([$currentSubdomainId, $user['id'], $chosenReset['name'], $rawKey]);
+        $pdo->prepare("INSERT INTO reset_logs (user_id, product_name, license_key) VALUES ( ?, ?, ?)")
+            ->execute([ $user['id'], $chosenReset['name'], $rawKey]);
     } catch (Throwable $e) {}
 
     // ── কি যদি এই স্টোরের অর্ডারে থাকে তাহলে সেটার রেকর্ড আপডেট হবে (না থাকলেও রিসেট হবে) ──
     $keyRow = ['id' => 0];
     try {
-        $stmtKey = $pdo->prepare("SELECT id FROM licenses WHERE user_id = ? AND license_key = ? AND subdomain_id = ? LIMIT 1");
-        $stmtKey->execute([$user['id'], $rawKey, $currentSubdomainId]);
+        $stmtKey = $pdo->prepare("SELECT id FROM licenses WHERE user_id = ? AND license_key = ? LIMIT 1");
+        $stmtKey->execute([$user['id'], $rawKey]);
         $found = $stmtKey->fetch(PDO::FETCH_ASSOC);
         if ($found) $keyRow = $found;
     } catch (Throwable $e) {}
@@ -1974,7 +1955,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'get_spin_data') {
         $segments = [];
             $segments = $pdo->query("SELECT id, title, bonus_amount, spend_target, probability, color 
                                      FROM spin_segments 
-                                     WHERE (subdomain_id = 0 OR subdomain_id IS NULL) AND is_active = 1 
+                                     WHERE is_active = 1 
                                      ORDER BY sort_order ASC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
         
 
@@ -1999,8 +1980,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'get_spin_data') {
         try {
             $stmtLB = $pdo->prepare("SELECT u.username, SUM(l.price * ?) as spent_bdt
                 FROM licenses l JOIN users u ON l.user_id = u.id 
-                WHERE l.subdomain_id = ? GROUP BY u.id, u.username ORDER BY spent_bdt DESC LIMIT 3");
-            $stmtLB->execute([$effectiveBdtRate, $currentSubdomainId]);
+                 GROUP BY u.id, u.username ORDER BY spent_bdt DESC LIMIT 3");
+            $stmtLB->execute([$effectiveBdtRate]);
             $topBuyers = $stmtLB->fetchAll(PDO::FETCH_ASSOC);
         } catch (Throwable $e) {}
 
@@ -2046,7 +2027,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'spin_wheel') {
     }
 
     $segments = [];
-        $stmtMainSeg = $pdo->prepare("SELECT * FROM spin_segments WHERE (subdomain_id = 0 OR subdomain_id IS NULL) AND is_active = 1 ORDER BY sort_order ASC, id ASC");
+        $stmtMainSeg = $pdo->prepare("SELECT * FROM spin_segments WHERE is_active = 1 ORDER BY sort_order ASC, id ASC");
         $stmtMainSeg->execute();
         $segments = $stmtMainSeg->fetchAll(PDO::FETCH_ASSOC);
     
@@ -2097,9 +2078,9 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'spin_wheel') {
         }
 
         try {
-            $pdo->prepare("INSERT INTO user_spin_offers (user_id, segment_id, title, spend_target, bonus_amount, status, expires_at, created_at, subdomain_id) 
-                           VALUES (?, ?, ?, ?, ?, 'active', DATE_ADD(NOW(), INTERVAL ? HOUR), NOW(), ?)")
-                ->execute([$user['id'], $wonSegment['id'] ?? 0, $wonSegment['title'], $spendTarget, $bonusAmt, $hours, $currentSubdomainId]);
+            $pdo->prepare("INSERT INTO user_spin_offers (user_id, segment_id, title, spend_target, bonus_amount, status, expires_at, created_at) 
+                           VALUES (?, ?, ?, ?, ?, 'active', DATE_ADD(NOW(), INTERVAL ? HOUR), NOW())")
+                ->execute([$user['id'], $wonSegment['id'] ?? 0, $wonSegment['title'], $spendTarget, $bonusAmt, $hours]);
         } catch (Throwable $e) {}
     } else {
         $bengaliNotice = "মন খারাপ করবেন না! আবার চেষ্টা করুন!";
@@ -2149,7 +2130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
     }
     $savedAvatarPath = 'uploads/avatars/' . $avatarFileName;
     try {
-        $pdo->prepare("UPDATE users SET avatar_url = ? WHERE id = ? AND subdomain_id = ?")->execute([$savedAvatarPath, (int)$user['id'], $currentSubdomainId]);
+        $pdo->prepare("UPDATE users SET avatar_url = ? WHERE id = ?")->execute([$savedAvatarPath, (int)$user['id']]);
         echo json_encode(['status' => 'success', 'avatar_url' => $savedAvatarPath]);
     } catch (Throwable $e) {
         echo json_encode(['status' => 'error', 'message' => 'Could not save photo!']);
@@ -2232,8 +2213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 $activeBanners = [];
 try {
         $stmtB = $pdo->query("SELECT * FROM banners 
-            WHERE (subdomain_id = 0 OR subdomain_id IS NULL OR subdomain_id = '' OR subdomain_id = '0') 
-              AND (is_active = 1 OR is_active = '1' OR is_active IS NULL OR status = 'active' OR status = '1' OR status IS NULL) 
+            WHERE (is_active = 1 OR is_active = '1' OR is_active IS NULL OR status = 'active' OR status = '1' OR status IS NULL) 
             ORDER BY sort_order ASC, id DESC");
         $activeBanners = ($stmtB && is_object($stmtB)) ? $stmtB->fetchAll(PDO::FETCH_ASSOC) : [];
     
@@ -2261,7 +2241,7 @@ if (empty($activeBanners)) {
 $activePaymentMethods = [];
 try {
         $stmtPM = $pdo->query("SELECT * FROM payment_methods 
-            WHERE (subdomain_id = 0 OR subdomain_id IS NULL OR subdomain_id = '' OR subdomain_id = '0') AND is_active = 1 
+            WHERE is_active = 1 
             ORDER BY sort_order ASC, id ASC");
         $activePaymentMethods = ($stmtPM && is_object($stmtPM)) ? $stmtPM->fetchAll(PDO::FETCH_ASSOC) : [];
     
@@ -2318,9 +2298,9 @@ $dynamicCategoriesFound = [];
 
 try {
     $stmtCatList = $pdo->prepare("SELECT name FROM product_categories 
-        WHERE subdomain_id = ? AND is_active = 1 
+        WHERE is_active = 1 
         ORDER BY sort_order ASC, id ASC");
-    $stmtCatList->execute([$currentSubdomainId]);
+    $stmtCatList->execute([]);
     foreach ($stmtCatList->fetchAll(PDO::FETCH_COLUMN) as $catName) {
         $catUpper = strtoupper(trim($catName));
         if ($catUpper === 'NOONROOT') $catUpper = 'NONROOT';
@@ -2346,8 +2326,7 @@ try {
                 FROM products p
                 LEFT JOIN product_plans pl ON pl.product_id = p.id 
                      AND (pl.is_deleted = 0 OR pl.is_deleted IS NULL)
-                WHERE (p.subdomain_id = 0 OR p.subdomain_id IS NULL OR p.subdomain_id = '' OR p.subdomain_id = '0')
-                  AND (p.is_active = 1 OR p.is_active IS NULL OR p.is_active = '1' OR p.is_active = 'active' OR p.is_active = '' OR p.status = 'active' OR p.status IS NULL OR p.is_maintenance = 1)
+                WHERE (p.is_active = 1 OR p.is_active IS NULL OR p.is_active = '1' OR p.is_active = 'active' OR p.is_active = '' OR p.status = 'active' OR p.status IS NULL OR p.is_maintenance = 1)
                   AND (p.is_deleted = 0 OR p.is_deleted IS NULL OR p.is_deleted = '0')
                   AND (p.status != 'deleted' OR p.status IS NULL)
                 ORDER BY p.is_pinned DESC, p.sort_order ASC, p.id ASC, pl.user_price ASC, pl.price ASC, pl.id ASC";
@@ -2526,9 +2505,9 @@ if ($isLoggedIn) {
     try {
         $targetRole = ($userRole === 'reseller') ? 'resellers' : 'customers';
         $stmtNotif = $pdo->prepare("SELECT id, title, message, created_at FROM system_notifications 
-            WHERE subdomain_id = ? AND (target_type = 'all' OR target_type = ?) 
+            WHERE (target_type = 'all' OR target_type = ?) 
             ORDER BY id DESC LIMIT 25");
-        $stmtNotif->execute([$currentSubdomainId, $targetRole]);
+        $stmtNotif->execute([ $targetRole]);
         $userNotifications = $stmtNotif ? $stmtNotif->fetchAll(PDO::FETCH_ASSOC) : [];
     } catch (Throwable $e) {}
 }
@@ -2546,16 +2525,16 @@ $userAllResetKeys = [];
 
 if ($isLoggedIn) {
     try {
-        $stmtKeys = $pdo->prepare("SELECT * FROM licenses WHERE user_id = ? AND subdomain_id = ? ORDER BY id DESC LIMIT 40");
-        $stmtKeys->execute([$user['id'], $currentSubdomainId]);
+        $stmtKeys = $pdo->prepare("SELECT * FROM licenses WHERE user_id = ? ORDER BY id DESC LIMIT 40");
+        $stmtKeys->execute([$user['id']]);
         $keys = $stmtKeys ? $stmtKeys->fetchAll(PDO::FETCH_ASSOC) : [];
 
-        $stmtTrx = $pdo->prepare("SELECT * FROM transactions WHERE user_id = ? AND subdomain_id = ? ORDER BY id DESC LIMIT 20");
-        $stmtTrx->execute([$user['id'], $currentSubdomainId]);
+        $stmtTrx = $pdo->prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 20");
+        $stmtTrx->execute([$user['id']]);
         $deposits = $stmtTrx ? $stmtTrx->fetchAll(PDO::FETCH_ASSOC) : [];
 
-        $stmtAllKeys = $pdo->prepare("SELECT license_key, validity, product_id, created_at FROM licenses WHERE user_id = ? AND subdomain_id = ? ORDER BY id DESC");
-        $stmtAllKeys->execute([$user['id'], $currentSubdomainId]);
+        $stmtAllKeys = $pdo->prepare("SELECT license_key, validity, product_id, created_at FROM licenses WHERE user_id = ? ORDER BY id DESC");
+        $stmtAllKeys->execute([$user['id']]);
         $userAllResetKeys = $stmtAllKeys ? $stmtAllKeys->fetchAll(PDO::FETCH_ASSOC) : [];
     } catch (Throwable $e) {}
 }
@@ -2563,8 +2542,8 @@ if ($isLoggedIn) {
 // LIVE FEED & TOP BUYERS (FOR BOTTOM LIVE HISTORY WIDGET)
 $livePurchaseFeed = [];
 try {
-    $stmtLF = $pdo->prepare("SELECT * FROM live_purchase_feed WHERE subdomain_id = ? ORDER BY id DESC LIMIT 25");
-    $stmtLF->execute([$currentSubdomainId]);
+    $stmtLF = $pdo->prepare("SELECT * FROM live_purchase_feed  ORDER BY id DESC LIMIT 25");
+    $stmtLF->execute([]);
     $livePurchaseFeed = $stmtLF->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {}
 
@@ -2578,14 +2557,14 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'get_live_history_
     try {
         $stmtS1 = $pdo->prepare("SELECT u.username, u.avatar_url, SUM(l.price) as spent 
             FROM licenses l JOIN users u ON l.user_id = u.id 
-            WHERE l.subdomain_id = ? GROUP BY u.id, u.username, u.avatar_url ORDER BY spent DESC LIMIT 15");
-        $stmtS1->execute([$currentSubdomainId]);
+             GROUP BY u.id, u.username, u.avatar_url ORDER BY spent DESC LIMIT 15");
+        $stmtS1->execute([]);
         $syncTop = $stmtS1->fetchAll(PDO::FETCH_ASSOC);
 
         $stmtS2 = $pdo->prepare("SELECT l.validity, l.price, l.created_at, u.username, u.avatar_url 
             FROM licenses l JOIN users u ON l.user_id = u.id 
-            WHERE l.subdomain_id = ? ORDER BY l.id DESC LIMIT 15");
-        $stmtS2->execute([$currentSubdomainId]);
+             ORDER BY l.id DESC LIMIT 15");
+        $stmtS2->execute([]);
         $syncRecent = $stmtS2->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {}
 
@@ -2602,8 +2581,8 @@ $topBuyers = [];
 try {
     $stmtLB = $pdo->prepare("SELECT u.username, u.avatar_url, SUM(l.price) as spent 
         FROM licenses l JOIN users u ON l.user_id = u.id 
-        WHERE l.subdomain_id = ? GROUP BY u.id, u.username, u.avatar_url ORDER BY spent DESC LIMIT 15");
-    $stmtLB->execute([$currentSubdomainId]);
+         GROUP BY u.id, u.username, u.avatar_url ORDER BY spent DESC LIMIT 15");
+    $stmtLB->execute([]);
     $topBuyers = $stmtLB->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {}
 
@@ -2612,16 +2591,16 @@ try {
     $stmtRO = $pdo->prepare("SELECT l.validity, l.price, l.created_at, u.username, u.avatar_url 
         FROM licenses l 
         JOIN users u ON l.user_id = u.id 
-        WHERE l.subdomain_id = ? 
+         
         ORDER BY l.id DESC LIMIT 15");
-    $stmtRO->execute([$currentSubdomainId]);
+    $stmtRO->execute([]);
     $recentOrdersList = $stmtRO->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {}
 
 // Custom Popups
 $activeCustomPopups = [];
 try {
-        $stmtPop = $pdo->query("SELECT * FROM custom_popups WHERE subdomain_id = 0 AND is_active = 1 ORDER BY sort_order ASC");
+        $stmtPop = $pdo->query("SELECT * FROM custom_popups WHERE is_active = 1 ORDER BY sort_order ASC");
     
     $activeCustomPopups = $stmtPop ? $stmtPop->fetchAll(PDO::FETCH_ASSOC) : [];
 } catch (Throwable $e) {}
