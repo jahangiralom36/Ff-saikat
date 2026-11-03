@@ -682,7 +682,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
             try {
                 $stmtIns = $pdo->prepare("INSERT INTO users 
                     (username, email, password, role, balance, coins, status, created_by, firebase_uid, referral_code, referred_by, created_at) 
-                    VALUES (?, ?, ?, 'user', 0.00, 0, 'active', ?, ?, ?, ?, NOW())");
+                    VALUES (?, ?, ?, 'customer', 0.00, 0, 'active', ?, ?, ?, ?, NOW())");
                 $stmtIns->execute([$cleanName, $targetEmail, $randomPass, $assignedCreator, $firebaseUid ?: null, $newReferralCode, $referredBy]);
                 $newId = (int)$pdo->lastInsertId();
 
@@ -816,7 +816,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['auth_action'])) {
         try {
             $stmtIns = $pdo->prepare("INSERT INTO users 
                 (username, email, password, role, balance, coins, status, created_by, referral_code, referred_by, created_at) 
-                VALUES (?, ?, ?, 'user', 0.00, 0, 'active', ?, ?, ?, NOW())");
+                VALUES (?, ?, ?, 'customer', 0.00, 0, 'active', ?, ?, ?, NOW())");
             $stmtIns->execute([$username, $email ?: null, $hashedPass, $assignedCreator, $newReferralCode, $referredBy]);
             $newId = (int)$pdo->lastInsertId();
 
@@ -872,7 +872,7 @@ if (!$isLoggedIn || !$user) {
     $user = [
         'id'                     => 0,
         'username'               => 'Guest',
-        'role'                   => 'user',
+        'role'                   => 'customer',
         'balance'                => 0.00,
         'coins'                  => 0,
         'email'                  => '',
@@ -885,7 +885,8 @@ if (!$isLoggedIn || !$user) {
     ];
 }
 
-$userRole = 'user';   // সবাই একই ধরনের ইউজার
+$rawRole  = strtolower(trim((string)($user['role'] ?? 'customer')));
+$userRole = ($rawRole === 'reseller') ? 'reseller' : 'customer';
 
 $canAddFund       = ($isDepositOnline && (int)($user['can_add_fund'] ?? 1) === 1) ? 1 : 0;
 $userCustomRate   = (float)($user['custom_bdt_rate'] ?? 0);
@@ -897,12 +898,18 @@ $userBalanceBdt   = round((float)$user['balance'] * $effectiveBdtRate, 0);
 $userCustomPrices    = [];
 $userAllowedProducts = [];
 
-if ($isLoggedIn) {
+if ($isLoggedIn && $userRole === 'reseller') {
     try {
         $stmtUCP = $pdo->prepare("SELECT plan_id, custom_price FROM user_custom_prices WHERE user_id = ?");
         $stmtUCP->execute([$user['id']]);
         $userCustomPrices = $stmtUCP->fetchAll(PDO::FETCH_KEY_PAIR);
 
+        if ((int)($user['is_product_restricted'] ?? 0) === 1) {
+            $stmtUAP = $pdo->prepare("SELECT product_id FROM user_allowed_products WHERE user_id = ?");
+            $stmtUAP->execute([$user['id']]);
+            $rawAllowed = $stmtUAP->fetchAll(PDO::FETCH_COLUMN);
+            $userAllowedProducts = array_filter(array_map('intval', $rawAllowed));
+        }
     } catch (Throwable $e) {}
 }
 
@@ -911,7 +918,7 @@ try {
         $stmtDCP = $pdo->query("SELECT ucp.plan_id, MIN(ucp.custom_price) 
             FROM user_custom_prices ucp
             JOIN users u ON u.id = ucp.user_id
-            WHERE 1=1
+            WHERE (u.role = 'customer' OR u.role IS NULL OR u.role = '')
             GROUP BY ucp.plan_id");
         if ($stmtDCP && is_object($stmtDCP)) {
             $defaultCustomerPrices = $stmtDCP->fetchAll(PDO::FETCH_KEY_PAIR);
@@ -1121,8 +1128,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
 
     $stmt = $pdo->prepare("SELECT p.id as real_product_id, p.name as product_name, p.is_active, 
                                   COALESCE(NULLIF(pl.plan_title, ''), NULLIF(pl.validity, ''), 'Standard Plan') as plan_title,
-                                  pl.user_price, pl.price,
-                                  COALESCE(pl.discount_percent, 0) as discount_percent,
+                                  pl.reseller_price, pl.user_price, pl.price,
+                                  pl.reseller_discount_percent, COALESCE(pl.discount_percent, 0) as discount_percent,
                                   pl.api_plan_id, pl.reward_coins, pl.coin_price 
                            FROM product_plans pl 
                            JOIN products p ON pl.product_id = p.id 
@@ -1137,19 +1144,26 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'verify_and_delive
         exit;
     }
 
-
+    if ($userRole === 'reseller' && !empty($userAllowedProducts) && !in_array((int)$plan['real_product_id'], array_map('intval', $userAllowedProducts))) {
+        echo json_encode(['status' => 'error', 'message' => 'Access Restricted: You do not have permission to purchase this product.']);
+        exit;
+    }
 
     $productFullName    = $plan['product_name'] . ' (' . $plan['plan_title'] . ')';
     $rewardCoinsPerItem = max(0, (int)($plan['reward_coins'] ?? 0));
     $totalRewardCoins   = $rewardCoinsPerItem * $quantity;
 
-    $basePrice = (float)(($plan['user_price'] ?? 0) ?: ($plan['price'] ?? 0));
+    $rawRetailPrice = (float)(($plan['user_price'] ?? 0) ?: (($plan['price'] ?? 0) ?: ($plan['reseller_price'] ?? 0)));
+    $rawResellPrice = (float)(($plan['reseller_price'] ?? 0) ?: (($plan['price'] ?? 0) ?: ($plan['user_price'] ?? 0)));
+    $basePrice = ($userRole === 'reseller') ? ($rawResellPrice > 0 ? $rawResellPrice : $rawRetailPrice) : ($rawRetailPrice > 0 ? $rawRetailPrice : $rawResellPrice);
 
     $unitPrice = null;
     if (isset($userCustomPrices[$planId]) && (float)$userCustomPrices[$planId] > 0) {
         $unitPrice = (float)$userCustomPrices[$planId];
     } else {
-        $explicitDiscount = (float)($plan['discount_percent'] ?? 0);
+        $explicitDiscount = ($userRole === 'reseller')
+            ? (float)($plan['reseller_discount_percent'] ?? 0)
+            : (float)($plan['discount_percent'] ?? 0);
         if ($explicitDiscount >= 0) {
             $unitPrice = round($basePrice * (1 - ($explicitDiscount / 100)), 2);
         } else {
@@ -1557,8 +1571,8 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
 
     $stmt = $pdo->prepare("SELECT p.id as real_product_id, p.name as product_name, p.is_active, 
                                   COALESCE(NULLIF(pl.plan_title, ''), NULLIF(pl.validity, ''), 'Standard Plan') as plan_title,
-                                  pl.user_price, pl.price,
-                                  COALESCE(pl.discount_percent, 0) as discount_percent,
+                                  pl.reseller_price, pl.user_price, pl.price,
+                                  pl.reseller_discount_percent, COALESCE(pl.discount_percent, 0) as discount_percent,
                                   pl.api_plan_id, pl.reward_coins, pl.coin_price 
                            FROM product_plans pl 
                            JOIN products p ON pl.product_id = p.id 
@@ -1573,20 +1587,27 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'live_generate') {
         exit;
     }
 
-
+    if ($userRole === 'reseller' && !empty($userAllowedProducts) && !in_array((int)$plan['real_product_id'], array_map('intval', $userAllowedProducts))) {
+        echo json_encode(['status' => 'error', 'message' => 'Access Restricted: You do not have permission to purchase this product.']);
+        exit;
+    }
 
     $productFullName    = $plan['product_name'] . ' (' . $plan['plan_title'] . ')';
     $rewardCoinsPerItem = max(0, (int)($plan['reward_coins'] ?? 0));
     $coinPricePerItem   = max(0, (int)($plan['coin_price'] ?? 0));
     $totalRewardCoins   = $rewardCoinsPerItem * $quantity;
 
-    $basePrice = (float)(($plan['user_price'] ?? 0) ?: ($plan['price'] ?? 0));
+    $rawRetailPrice = (float)(($plan['user_price'] ?? 0) ?: (($plan['price'] ?? 0) ?: ($plan['reseller_price'] ?? 0)));
+    $rawResellPrice = (float)(($plan['reseller_price'] ?? 0) ?: (($plan['price'] ?? 0) ?: ($plan['user_price'] ?? 0)));
+    $basePrice = ($userRole === 'reseller') ? ($rawResellPrice > 0 ? $rawResellPrice : $rawRetailPrice) : ($rawRetailPrice > 0 ? $rawRetailPrice : $rawResellPrice);
 
     $unitPrice = null;
     if (isset($userCustomPrices[$planId]) && (float)$userCustomPrices[$planId] > 0) {
         $unitPrice = (float)$userCustomPrices[$planId];
     } else {
-        $explicitDiscount = (float)($plan['discount_percent'] ?? 0);
+        $explicitDiscount = ($userRole === 'reseller')
+            ? (float)($plan['reseller_discount_percent'] ?? 0)
+            : (float)($plan['discount_percent'] ?? 0);
         if ($explicitDiscount >= 0) {
             $unitPrice = round($basePrice * (1 - ($explicitDiscount / 100)), 2);
         } else {
@@ -2299,7 +2320,8 @@ try {
                        p.app_download_url,
                        pl.id as plan_id, 
                        COALESCE(NULLIF(pl.plan_title, ''), NULLIF(pl.validity, ''), 'Standard Plan') as validity, 
-                       pl.user_price, pl.price, COALESCE(pl.discount_percent, 0) as discount_percent, pl.api_plan_id,
+                       pl.reseller_price, pl.user_price, pl.price, pl.reseller_discount_percent, 
+                       COALESCE(pl.discount_percent, 0) as discount_percent, pl.api_plan_id,
                        pl.reward_coins, pl.coin_price 
                 FROM products p
                 LEFT JOIN product_plans pl ON pl.product_id = p.id 
@@ -2317,7 +2339,11 @@ try {
         $pId    = (int)$dp['product_id'];
         $planId = (int)($dp['plan_id'] ?? 0);
 
-
+        if ($userRole === 'reseller' && (int)($user['is_product_restricted'] ?? 0) === 1 && !empty($userAllowedProducts)) {
+            if (!in_array($pId, array_map('intval', $userAllowedProducts), true)) {
+                continue;
+            }
+        }
 
         $pName = trim($dp['product_name']);
         if (empty($pName)) continue;
@@ -2340,9 +2366,22 @@ try {
         $prodActiveStatus = (int)($dp['is_active'] ?? 1);
         $prodAppUrl       = !empty($dp['app_download_url']) ? $dp['app_download_url'] : (!empty($dp['download_link']) ? $dp['download_link'] : '');
 
-        $regularBaseUSD = (float)(($dp['user_price'] ?? 0) ?: ($dp['price'] ?? 0));
+        $rawRetailUSD = (float)(($dp['user_price'] ?? 0) ?: (($dp['price'] ?? 0) ?: ($dp['reseller_price'] ?? 0)));
+        $rawResellUSD = (float)(($dp['reseller_price'] ?? 0) ?: (($dp['price'] ?? 0) ?: ($dp['user_price'] ?? 0)));
+
+        $regularBaseUSD = ($userRole === 'reseller')
+            ? (($rawResellUSD > 0) ? $rawResellUSD : $rawRetailUSD)
+            : (($rawRetailUSD > 0) ? $rawRetailUSD : $rawResellUSD);
 
         $hasCustomPrice = false;
+        if ($userRole === 'reseller') {
+            if ($planId > 0 && isset($userCustomPrices[$planId]) && (float)$userCustomPrices[$planId] > 0) {
+                $finalPrice = (float)$userCustomPrices[$planId];
+                $hasCustomPrice = true;
+            } else {
+                $finalPrice = $regularBaseUSD;
+            }
+        } else {
             if ($isLoggedIn) {
                 if ($planId > 0 && isset($userCustomPrices[$planId]) && (float)$userCustomPrices[$planId] > 0) {
                     $finalPrice = (float)$userCustomPrices[$planId];
@@ -2358,9 +2397,14 @@ try {
                     $finalPrice = $regularBaseUSD;
                 }
             }
-        
+        }
 
-        $explicitDiscount = (float)($dp['discount_percent'] ?? 0);
+        $explicitDiscount = 0.0;
+        if ($userRole === 'reseller') {
+            $explicitDiscount = (float)($dp['reseller_discount_percent'] ?? 0);
+        } else {
+            $explicitDiscount = (float)($dp['discount_percent'] ?? 0);
+        }
 
         $origRetailUSD = $regularBaseUSD;
         $planDiscount  = 0;
@@ -2459,10 +2503,11 @@ try {
 $userNotifications = [];
 if ($isLoggedIn) {
     try {
+        $targetRole = ($userRole === 'reseller') ? 'resellers' : 'customers';
         $stmtNotif = $pdo->prepare("SELECT id, title, message, created_at FROM system_notifications 
-            WHERE (target_type = 'all' OR target_user_id = ?) 
+            WHERE (target_type = 'all' OR target_type = ?) 
             ORDER BY id DESC LIMIT 25");
-        $stmtNotif->execute([(int)$user['id']]);
+        $stmtNotif->execute([ $targetRole]);
         $userNotifications = $stmtNotif ? $stmtNotif->fetchAll(PDO::FETCH_ASSOC) : [];
     } catch (Throwable $e) {}
 }

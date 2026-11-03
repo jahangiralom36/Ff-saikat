@@ -1,13 +1,13 @@
 -- ====================================================================
 -- database.sql — সব টেবিল (index.php + admin.php + config.php এর জন্য)
 --
--- কীভাবে ইম্পোর্ট করবেন:
+-- ✅ নিরাপদ: এই ফাইল শুধু "CREATE TABLE IF NOT EXISTS" ব্যবহার করে।
+--    টেবিল আগে থেকে থাকলে কিছুই মুছবে না, কিছুই বদলাবে না — ইউজার, প্রোডাক্ট, অর্ডার, ব্যালেন্স
+--    সব ডাটা যেমন আছে তেমনই থাকবে। যতবার ইচ্ছা ইম্পোর্ট করা যায়, শুধু যে টেবিল নেই সেগুলো তৈরি হবে।
+--
+-- কীভাবে ইম্পোর্ট করবেন (প্রথমবার):
 --   cPanel → phpMyAdmin → আপনার database সিলেক্ট → Import → এই ফাইল → Go
 --   তারপর config.php তে DB_NAME / DB_USER / DB_PASS বসান।
---
--- ⚠️ সতর্কতা: এই ফাইল ইম্পোর্ট করলে নিচের টেবিলগুলো আগে মুছে নতুন করে বানানো হয়।
---    অর্থাৎ এই ডাটাবেজে আগের ডাটা (ইউজার, প্রোডাক্ট, অর্ডার) থাকলে মুছে যাবে।
---    তাই চালু সাইটে আবার ইম্পোর্ট করবেন না — শুধু প্রথমবার সেটআপের সময় করুন।
 --
 -- অ্যাডমিন ইউজার/পাসওয়ার্ড ডাটাবেজে নেই — config.php (ADMIN_USERNAME / ADMIN_PASSWORD) এ আছে।
 -- একটাই স্টোর — কোনো subdomain / tenant নেই।
@@ -15,37 +15,6 @@
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
-
-DROP TABLE IF EXISTS `system_settings`;
-DROP TABLE IF EXISTS `users`;
-DROP TABLE IF EXISTS `product_categories`;
-DROP TABLE IF EXISTS `products`;
-DROP TABLE IF EXISTS `product_plans`;
-DROP TABLE IF EXISTS `stock_keys`;
-DROP TABLE IF EXISTS `user_custom_prices`;
-DROP TABLE IF EXISTS `user_allowed_products`;
-DROP TABLE IF EXISTS `licenses`;
-DROP TABLE IF EXISTS `transactions`;
-DROP TABLE IF EXISTS `gateway_transactions`;
-DROP TABLE IF EXISTS `payment_methods`;
-DROP TABLE IF EXISTS `live_purchase_feed`;
-DROP TABLE IF EXISTS `coupons`;
-DROP TABLE IF EXISTS `coupon_usages`;
-DROP TABLE IF EXISTS `banners`;
-DROP TABLE IF EXISTS `custom_popups`;
-DROP TABLE IF EXISTS `system_notifications`;
-DROP TABLE IF EXISTS `referral_settings`;
-DROP TABLE IF EXISTS `spin_segments`;
-DROP TABLE IF EXISTS `user_spin_offers`;
-DROP TABLE IF EXISTS `deposit_bonuses`;
-DROP TABLE IF EXISTS `reset_logs`;
-DROP TABLE IF EXISTS `activity_logs`;
-DROP TABLE IF EXISTS `settings`;
-DROP TABLE IF EXISTS `categories`;
-DROP TABLE IF EXISTS `orders`;
-DROP TABLE IF EXISTS `deposits`;
-DROP TABLE IF EXISTS `announcements`;
-
 
 -- ---------------------------------------------------------------- settings
 CREATE TABLE IF NOT EXISTS `system_settings` (
@@ -61,7 +30,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `password`               VARCHAR(255) NOT NULL,
   `firebase_uid`           VARCHAR(128) NULL,
   `avatar_url`             VARCHAR(255) NULL,
-  `role`                   VARCHAR(20) NOT NULL DEFAULT 'user',
+  `role`                   VARCHAR(20) NOT NULL DEFAULT 'customer',
   `status`                 VARCHAR(20) NOT NULL DEFAULT 'active',
   `balance`                DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   `profit_balance`         DECIMAL(14,2) NOT NULL DEFAULT 0.00,
@@ -133,9 +102,10 @@ CREATE TABLE IF NOT EXISTS `product_plans` (
   `price`                     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `regular_price`             DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `user_price`                DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  `cost_price`                DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `reseller_price`            DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `discount_percent`          DECIMAL(5,2) NOT NULL DEFAULT 0.00,
   `api_plan_id`               INT NOT NULL DEFAULT 0,
+  `reseller_discount_percent` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
   `reward_coins`              INT NOT NULL DEFAULT 0,
   `coin_price`                INT NOT NULL DEFAULT 0,
   `is_active`                 TINYINT(1) NOT NULL DEFAULT 1,
