@@ -1,6 +1,8 @@
 -- ====================================================================
--- Ff-saikat Store — Database Schema (MySQL 5.7+ / MariaDB 10.3+)
--- Import this file once, or just run install.php in the browser.
+-- Ff Store — database.sql
+-- phpMyAdmin → আপনার database select → Import → এই ফাইল দিন। (একবারই)
+-- Default admin login:  username: admin   |   password: Admin@12345
+-- Login করেই admin panel থেকে password বদলে নিন।
 -- ====================================================================
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
@@ -151,3 +153,35 @@ CREATE TABLE IF NOT EXISTS `activity_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- ---------------------------------------------------------------- default admin
+INSERT INTO `users` (`username`,`email`,`password_hash`,`role`) VALUES
+('admin','admin@example.com','$2y$10$2m2Ex.sj1tE0KTcxNVqM1eRL6SGLxVgrHxfRgbpvaMrsMvS.boImS','admin')
+ON DUPLICATE KEY UPDATE `role`='admin';
+
+-- ---------------------------------------------------------------- default settings (admin → Site Settings থেকে edit হবে)
+INSERT IGNORE INTO `settings` (`setting_key`,`setting_value`) VALUES
+('site_name','Ff Store'),
+('site_tagline','Instant delivery • Trusted • 24/7 support'),
+('currency_symbol','৳'),
+('theme_primary','#2563eb'),
+('theme_accent','#f43f5e'),
+('theme_mode','light'),
+('support_link',''),
+('support_label','Contact Admin Support'),
+('footer_text','© Ff Store. All rights reserved.'),
+('min_deposit','50'),
+('max_deposit','50000'),
+('site_maintenance','0'),
+('site_maintenance_msg','Store upgrade in progress. We will be back shortly.'),
+('maint_ribbon_text','MAINTENANCE'),
+('maint_button_text','MAINTENANCE'),
+('maint_popup_chip','TEMPORARILY UNAVAILABLE'),
+('maint_popup_rules_title','RULES & INFORMATION:'),
+('maint_default_msg','⚠️ Rules & Conditions:\nএই প্রোডাক্টটির সার্ভার আপগ্রেড চলছে। সাময়িক অসুবিধার জন্য আমরা দুঃখিত। খুব শীঘ্রই সার্ভিস চালু করা হবে।'),
+('maint_close_text','CLOSE');
+
+-- ---------------------------------------------------------------- starter payment methods (admin → Payment Methods থেকে নিজের নম্বর দিন)
+INSERT INTO `payment_methods` (`name`,`account_no`,`account_type`,`instructions`,`sort_order`) VALUES
+('bKash','01XXXXXXXXX','Personal','Send Money করে Transaction ID দিন।',1),
+('Nagad','01XXXXXXXXX','Personal','Send Money করে Transaction ID দিন।',2);

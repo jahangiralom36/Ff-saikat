@@ -3,18 +3,18 @@
 Single-domain key/licence store (PHP 8 + MySQL). No subdomains, no Telegram, no separate admin password.
 
 ## Setup
-1. Upload the files, create an empty MySQL database.
-2. Open `/install.php` → enter DB details + your admin account → done (`install.lock` is created).
-   (Or import `schema.sql` manually and copy `config.sample.php` → `config.local.php`.)
-3. Log in on the home page with the admin account, then open `/admin.php` (an **Admin** button shows in the header).
+1. cPanel-এ একটা MySQL database + user বানান।
+2. phpMyAdmin → database → **Import** → `database.sql`
+3. `config.php` খুলে `DB_NAME / DB_USER / DB_PASS` বসান।
+4. Site-এ login: `admin` / `Admin@12345` → **Admin** button → password বদলান।
 
 ## Files
 | File | Purpose |
 |---|---|
 | `index.php` | Storefront: products, login/signup, buy, add-fund, my keys |
 | `admin.php` | Admin panel (same login as the store, role = admin) |
-| `schema.sql` | All tables |
-| `install.php` | One-time installer |
+| `database.sql` | All tables + default admin + default settings |
+| `config.php` | Database credentials |
 | `inc/bootstrap.php` | DB, session, settings, CSRF, helpers |
 | `assets/` | `style.css`, `app.js`, `admin.css`, `admin.js` |
 

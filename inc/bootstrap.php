@@ -5,14 +5,7 @@ define('ROOT_DIR', dirname(__DIR__));
 define('UPLOAD_DIR', ROOT_DIR . '/uploads');
 
 // ---------------------------------------------------------------- config
-$cfgFile = ROOT_DIR . '/config.local.php';
-$CFG = is_file($cfgFile) ? (array)require $cfgFile : [];
-$CFG += [
-    'db_host' => getenv('DB_HOST') ?: 'localhost',
-    'db_name' => getenv('DB_NAME') ?: '',
-    'db_user' => getenv('DB_USER') ?: '',
-    'db_pass' => getenv('DB_PASS') ?: '',
-];
+require ROOT_DIR . '/config.php';
 
 // ---------------------------------------------------------------- session
 if (session_status() === PHP_SESSION_NONE) {
@@ -30,12 +23,11 @@ if (session_status() === PHP_SESSION_NONE) {
 // ---------------------------------------------------------------- database
 function db(): PDO {
     static $pdo = null;
-    global $CFG;
     if ($pdo) return $pdo;
     try {
         $pdo = new PDO(
-            "mysql:host={$CFG['db_host']};dbname={$CFG['db_name']};charset=utf8mb4",
-            $CFG['db_user'], $CFG['db_pass'],
+            'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+            DB_USER, DB_PASS,
             [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -44,10 +36,7 @@ function db(): PDO {
         );
     } catch (PDOException $e) {
         http_response_code(500);
-        if (is_file(ROOT_DIR . '/install.php') && !is_file(ROOT_DIR . '/install.lock')) {
-            header('Location: install.php'); exit;
-        }
-        exit('Database connection failed. Check config.local.php');
+        exit('Database connection failed. config.php এ DB_NAME / DB_USER / DB_PASS ঠিক আছে কিনা দেখুন।');
     }
     return $pdo;
 }

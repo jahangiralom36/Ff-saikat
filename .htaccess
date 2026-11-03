@@ -1,5 +1,5 @@
 Options -Indexes
-<FilesMatch "(^config\.local\.php|^config\.sample\.php|\.sql|\.lock|\.md)$">
+<FilesMatch "(^config\.php|\.sql|\.lock|\.md)$">
   Require all denied
 </FilesMatch>
 <IfModule mod_headers.c>
