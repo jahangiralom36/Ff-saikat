@@ -492,7 +492,7 @@ function syncStackedPricesForUser(PDO $pdo, int $userId) {
         $userDisc = (float)($u['discount_percent'] ?? 0);
         $role     = strtolower(trim((string)($u['role'] ?? 'customer')));
 
-        $plansStmt = $pdo->prepare("SELECT pp.id, pp.user_price, pp.reseller_price, pp.regular_price, pp.discount_percent, pp.reseller_discount_percent 
+        $plansStmt = $pdo->prepare("SELECT pp.id, pp.user_price, pp.regular_price, pp.discount_percent 
                                     FROM product_plans pp 
                                     JOIN products p ON pp.product_id = p.id 
                                     ");
@@ -505,19 +505,13 @@ function syncStackedPricesForUser(PDO $pdo, int $userId) {
 
         foreach ($plans as $pl) {
             $planDisc = (float)($pl['discount_percent'] ?? 0);
-            if ($role === 'reseller' && (float)($pl['reseller_discount_percent'] ?? 0) > $planDisc) {
-                $planDisc = (float)$pl['reseller_discount_percent'];
-            }
 
             $totalDisc = min(99.0, max(0.0, $planDisc + $userDisc));
 
             $regPrice = (float)($pl['regular_price'] ?? 0);
             if ($regPrice <= 0) $regPrice = (float)($pl['user_price'] ?? 0);
 
-            $resellBase = (float)($pl['reseller_price'] ?? 0);
-            if ($resellBase <= 0) $resellBase = $regPrice;
-
-            $baseRegular = ($role === 'reseller') ? $resellBase : $regPrice;
+            $baseRegular = $regPrice;
             if ($baseRegular <= 0) $baseRegular = 1.00;
 
             if ($totalDisc > 0) {
@@ -528,17 +522,9 @@ function syncStackedPricesForUser(PDO $pdo, int $userId) {
     } catch (Throwable $e) {}
 }
 
-function syncStackedPricesForAllUsers(PDO $pdo, ?string $onlyRole = null) {
+function syncStackedPricesForAllUsers(PDO $pdo) {
     try {
-        $sql = "SELECT id FROM users WHERE 1=1";
-        if ($onlyRole === 'customer') {
-            $sql .= " AND (LOWER(TRIM(COALESCE(role, 'customer'))) = 'customer' OR role IS NULL OR role = '')";
-        } elseif ($onlyRole === 'reseller') {
-            $sql .= " AND LOWER(TRIM(role)) = 'reseller'";
-        }
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute();
-        $uIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $uIds = $pdo->query("SELECT id FROM users")->fetchAll(PDO::FETCH_COLUMN);
         foreach ($uIds as $uId) {
             syncStackedPricesForUser($pdo, (int)$uId);
         }
@@ -776,15 +762,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                     $stmtPlan->execute([$extId, $prodId]);
                     $planExists = $stmtPlan->fetchColumn();
 
-                    $resellerPrice = $basePrice;
+                    $costPrice = $basePrice;
                     $userPrice     = round($basePrice * 1.25, 2);
 
                     if (!$planExists) {
-                        $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, 30, ?, ?, ?, ?, 0.00, 20.00, ?, 0, 0)");
-                        $stmtPlanIns->execute([$prodId, $planTitle, $resellerPrice, $userPrice, $userPrice, $extId]);
+                        $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, cost_price, user_price, regular_price, discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, 30, ?, ?, ?, ?, 0.00, ?, 0, 0)");
+                        $stmtPlanIns->execute([$prodId, $planTitle, $costPrice, $userPrice, $userPrice, $extId]);
                     } else {
-                        $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, reseller_price = ?, user_price = ?, regular_price = ? WHERE id = ?");
-                        $stmtPlanUp->execute([$planTitle, $resellerPrice, $userPrice, $userPrice, $planExists]);
+                        $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, cost_price = ?, user_price = ?, regular_price = ? WHERE id = ?");
+                        $stmtPlanUp->execute([$planTitle, $costPrice, $userPrice, $userPrice, $planExists]);
                     }
                     $syncedCount++;
                 }
@@ -832,15 +818,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                         $stmtPlan->execute([$extId, $prodId]);
                         $planExists = $stmtPlan->fetchColumn();
 
-                        $resellerPrice = $basePrice;
+                        $costPrice = $basePrice;
                         $userPrice     = round($basePrice * 1.25, 2);
 
                         if (!$planExists) {
-                            $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, 30, ?, ?, ?, ?, 0.00, 20.00, ?, 0, 0)");
-                            $stmtPlanIns->execute([$prodId, $planTitle, $resellerPrice, $userPrice, $userPrice, $extId]);
+                            $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, cost_price, user_price, regular_price, discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, 30, ?, ?, ?, ?, 0.00, ?, 0, 0)");
+                            $stmtPlanIns->execute([$prodId, $planTitle, $costPrice, $userPrice, $userPrice, $extId]);
                         } else {
-                            $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, reseller_price = ?, user_price = ?, regular_price = ? WHERE id = ?");
-                            $stmtPlanUp->execute([$planTitle, $resellerPrice, $userPrice, $userPrice, $planExists]);
+                            $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, cost_price = ?, user_price = ?, regular_price = ? WHERE id = ?");
+                            $stmtPlanUp->execute([$planTitle, $costPrice, $userPrice, $userPrice, $planExists]);
                         }
                         $syncedCount++;
                     }
@@ -953,16 +939,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         } catch (Throwable $e) {}
 
             if (!empty($_POST['plan_user_price']) && is_array($_POST['plan_user_price'])) {
-                $upPlan = $pdo->prepare("UPDATE product_plans SET user_price = ?, regular_price = ?, reseller_price = ?, reward_coins = ?, coin_price = ? WHERE id = ? AND product_id = ?");
+                $upPlan = $pdo->prepare("UPDATE product_plans SET user_price = ?, regular_price = ?, reward_coins = ?, coin_price = ? WHERE id = ? AND product_id = ?");
                 foreach ($_POST['plan_user_price'] as $planId => $uPrice) {
                     $uP = max(0.01, (float)$uPrice);
-                    // রিসেলার প্রাইস ফাঁকা/না থাকলে আগের রিসেলার প্রাইস রাখা হবে (আগে প্রতি সেভে Customer এর 80% বসে যেত)
-                $rPRaw = trim((string)($_POST['plan_reseller_price'][$planId] ?? ''));
-                if (is_numeric($rPRaw) && (float)$rPRaw > 0) { $rP = round((float)$rPRaw, 2); }
-                else { $stOldR = $pdo->prepare("SELECT reseller_price FROM product_plans WHERE id = ? LIMIT 1"); $stOldR->execute([(int)$planId]); $rP = (float)($stOldR->fetchColumn() ?: 0); }
                     $rCoins = isset($_POST['plan_reward_coins'][$planId]) ? max(0, (int)$_POST['plan_reward_coins'][$planId]) : 0;
                     $cPrice = isset($_POST['plan_coin_price'][$planId]) ? max(0, (int)$_POST['plan_coin_price'][$planId]) : 0;
-                    $upPlan->execute([$uP, $uP, $rP, $rCoins, $cPrice, (int)$planId, $prodId]);
+                    $upPlan->execute([$uP, $uP, $rCoins, $cPrice, (int)$planId, $prodId]);
                 }
             }
             $toast = ['type' => 'success', 'msg' => 'Product updated successfully!'];
@@ -973,12 +955,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $prodId = (int)$_POST['product_id'];
         $title = trim($_POST['plan_title'] ?? '1 Day');
         $uPrice = (float)($_POST['user_price'] ?? 1.00);
-        $rPrice = (float)($_POST['reseller_price'] ?? round($uPrice * 0.8, 2));
+        $rPrice = $uPrice;
         $apiId = (int)($_POST['api_plan_id'] ?? 0);
         $rewardCoins = max(0, (int)($_POST['reward_coins'] ?? 0));
         $coinPrice = max(0, (int)($_POST['coin_price'] ?? 0));
 
-        $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, api_plan_id, reward_coins, coin_price) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)")
+        $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, cost_price, user_price, regular_price, api_plan_id, reward_coins, coin_price) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)")
             ->execute([$prodId, $title, $rPrice, $uPrice, $uPrice, $apiId, $rewardCoins, $coinPrice]);
         $toast = ['type' => 'success', 'msg' => 'Plan with Coins attached!'];
     }
@@ -1022,7 +1004,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         $maxDisc    = max(0.0, (float)($_POST['max_discount'] ?? 0));
         $maxUses    = max(0, (int)($_POST['max_uses'] ?? 0));
         $perUser    = max(0, (int)($_POST['per_user_limit'] ?? 1));
-        $userRoleC  = in_array($_POST['user_role'] ?? 'all', ['all', 'customer', 'reseller'], true) ? $_POST['user_role'] : 'all';
+        $userRoleC  = 'all';
         $title      = trim($_POST['title'] ?? '');
         $startsAt   = !empty($_POST['starts_at']) ? date('Y-m-d H:i:s', strtotime($_POST['starts_at'])) : null;
         $expiresAt  = !empty($_POST['expires_at']) ? date('Y-m-d H:i:s', strtotime($_POST['expires_at'])) : null;
@@ -1080,23 +1062,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
             $toast = ['type' => 'success', 'msg' => $turnOn ? '🔄 HWID Reset ENABLED for this product' : '⛔ HWID Reset DISABLED for this product'];
         }
     }
-    // 💲 QUICK PLAN PRICES (Products → প্রোডাক্টের ভেতরে Customer $ / Reseller $)
+    // 💲 QUICK PLAN PRICES 
     if ($act === 'save_plan_prices_quick') {
         $prodId = (int)($_POST['product_id'] ?? 0);
-        $userPrices = $_POST['qp_user'] ?? []; $resPrices = $_POST['qp_res'] ?? [];
+        $userPrices = $_POST['qp_user'] ?? [];
         $cnt = 0;
         if ($prodId > 0 && is_array($userPrices)) {
-            $upQ = $pdo->prepare("UPDATE product_plans SET user_price = ?, regular_price = ?, reseller_price = ? WHERE id = ? AND product_id = ?");
+            $upQ = $pdo->prepare("UPDATE product_plans SET user_price = ?, regular_price = ? WHERE id = ? AND product_id = ?");
             foreach ($userPrices as $plId => $uRaw) {
                 if (!is_numeric($uRaw) || (float)$uRaw <= 0) continue;
                 $uP = round((float)$uRaw, 2);
-                $rRaw = trim((string)($resPrices[$plId] ?? ''));
-                $rP = (is_numeric($rRaw) && (float)$rRaw > 0) ? round((float)$rRaw, 2) : 0.00;
-                $upQ->execute([$uP, $uP, $rP, (int)$plId, $prodId]);
+                $upQ->execute([$uP, $uP, (int)$plId, $prodId]);
                 $cnt++;
             }
         }
-        $toast = ['type' => 'success', 'msg' => "Prices saved for $cnt plan(s) — Customer & Reseller!"];
+        $toast = ['type' => 'success', 'msg' => "Prices saved for $cnt plan(s)!"];
     }
 
     // 🔧 QUICK PRODUCT MAINTENANCE TOGGLE (প্রোডাক্ট লিস্ট থেকে এক ক্লিকে)
@@ -1130,7 +1110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     }
 
     // ====================================================================
-    // STORE ADVANCED DISCOUNT ENGINE (ALL PRODUCTS / CUSTOMERS / RESELLERS)
+    // STORE ADVANCED DISCOUNT ENGINE (ALL PRODUCTS / USERS)
     // ====================================================================
     if ($act === 'apply_bulk_product_discount') {
         $discPercent = max(0.0, min(99.0, (float)($_POST['discount_percent'] ?? 0)));
@@ -1198,35 +1178,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     }
 
     if ($act === 'apply_bulk_user_discount') {
-        $targetRole  = in_array($_POST['target_role'] ?? '', ['customer', 'reseller']) ? $_POST['target_role'] : 'customer';
         $discPercent = max(0.0, min(99.0, (float)($_POST['discount_percent'] ?? 0)));
-
         try {
-            if ($targetRole === 'customer') {
-                $stmt = $pdo->prepare("UPDATE users SET discount_percent = ? WHERE (LOWER(TRIM(COALESCE(role, 'customer'))) = 'customer' OR role IS NULL OR role = '')");
-            } else {
-                $stmt = $pdo->prepare("UPDATE users SET discount_percent = ? WHERE LOWER(TRIM(role)) = 'reseller'");
-            }
+            $stmt = $pdo->prepare("UPDATE users SET discount_percent = ?");
             $stmt->execute([$discPercent]);
-
-            syncStackedPricesForAllUsers($pdo, $targetRole);
-            $roleLabel = ucfirst($targetRole);
-            $toast = ['type' => 'success', 'msg' => ($discPercent > 0) ? "Applied $discPercent% extra discount to all {$roleLabel}s (Stacked)!" : "Discounts reset to 0% for all {$roleLabel}s!"];
+            syncStackedPricesForAllUsers($pdo);
+            $toast = ['type' => 'success', 'msg' => ($discPercent > 0) ? "Applied $discPercent% extra discount to all users (Stacked)!" : "Discounts reset to 0% for all users!"];
         } catch (Throwable $e) {
             $toast = ['type' => 'error', 'msg' => 'Error: ' . $e->getMessage()];
         }
     }
 
     if ($act === 'reset_all_user_discounts') {
-        $targetRole = in_array($_POST['target_role'] ?? '', ['customer', 'reseller']) ? $_POST['target_role'] : 'customer';
         try {
-            if ($targetRole === 'customer') {
-                $pdo->prepare("UPDATE users SET discount_percent = 0.00 WHERE (LOWER(TRIM(COALESCE(role, 'customer'))) = 'customer' OR role IS NULL OR role = '')")->execute([]);
-            } else {
-                $pdo->prepare("UPDATE users SET discount_percent = 0.00 WHERE LOWER(TRIM(role)) = 'reseller'")->execute([]);
-            }
-            syncStackedPricesForAllUsers($pdo, $targetRole);
-            $toast = ['type' => 'success', 'msg' => "All {$targetRole} discounts turned off successfully!"];
+            $pdo->prepare("UPDATE users SET discount_percent = 0.00")->execute([]);
+            syncStackedPricesForAllUsers($pdo);
+            $toast = ['type' => 'success', 'msg' => "All user discounts turned off successfully!"];
         } catch (Throwable $e) {
             $toast = ['type' => 'error', 'msg' => 'Error: ' . $e->getMessage()];
         }
@@ -1486,7 +1453,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                 // 🛡️ অর্ডার: কি ডেলিভারি হবে — ব্যালেন্সে টাকা যোগ হবে না
                 $res = vpAdminDeliverOrder($pdo, $trx, $settings, 'ADMIN');
                 $toast = $res['ok']
-                    ? ['type' => 'success', 'msg' => '✅ Order approved — ' . count($res['keys']) . ' key(s) delivered to the customer (' . $res['product'] . ')']
+                    ? ['type' => 'success', 'msg' => '✅ Order approved — ' . count($res['keys']) . ' key(s) delivered to the user (' . $res['product'] . ')']
                     : ['type' => 'error', 'msg' => '⚠️ ' . $res['message']];
             } elseif ($status === 'approved' || ($status === 'credit_wallet' && $isOrder)) {
                 // ডিপোজিট (অথবা অ্যাডমিন নিজে "Credit Wallet" বাছলে) → ব্যালেন্সে যোগ
@@ -1496,7 +1463,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
                     $bonusFloat = (!empty($trx['bonus_amount']) && (float)$trx['bonus_amount'] > 0) ? round((float)$trx['bonus_amount'] / $effectiveBdtRate, 2) : 0.00;
                     $totalCredit = max(0.0, (float)$trx['amount'] + ($isOrder ? 0.0 : $bonusFloat));
                     $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$totalCredit, $trx['user_id']]);
-                    $toast = ['type' => 'success', 'msg' => $isOrder ? 'Order amount credited to customer wallet.' : 'Deposit approved & balance added!'];
+                    $toast = ['type' => 'success', 'msg' => $isOrder ? 'Order amount credited to user wallet.' : 'Deposit approved & balance added!'];
                 }
             } elseif ($status === 'rejected') {
                 $pdo->prepare("UPDATE transactions SET status = 'rejected' WHERE id = ? AND status = 'pending'")->execute([$trxId]);
@@ -1728,39 +1695,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
     }
 
 
-    // 💰 RESELLER PRICE MANAGER — প্রতিটা প্রোডাক্টের প্রতিটা ভেরিয়েন্টের রিসেলার প্রাইস একসাথে সেভ
-    if ($act === 'bulk_save_reseller_prices') {
-        $rPrices = $_POST['rp_price'] ?? [];
-        $rDiscs  = $_POST['rp_disc'] ?? [];
-        $updStmt = $pdo->prepare("UPDATE product_plans SET reseller_price = ?, reseller_discount_percent = ? WHERE id = ?");
-        $changed = 0;
-        if (is_array($rPrices)) {
-            foreach ($rPrices as $plId => $rawPrice) {
-                $plId = (int)$plId;
-                $rawPrice = trim((string)$rawPrice);
-                if ($plId <= 0 || $rawPrice === '' || !is_numeric($rawPrice)) continue;
-                $price = max(0.01, round((float)$rawPrice, 2));
-                $disc  = max(0.0, min(99.0, (float)($rDiscs[$plId] ?? 0)));
-                $updStmt->execute([$price, $disc, $plId]);
-                $changed += $updStmt->rowCount();
-            }
-        }
-        // যেসব রিসেলারের নিজস্ব % ডিসকাউন্ট আছে তাদের ক্যাশ করা দাম নতুন রিসেলার প্রাইস থেকে আবার হিসাব
-        try {
-            $rsStmt = $pdo->prepare("SELECT id FROM users WHERE role = 'reseller' AND discount_percent > 0");
-            $rsStmt->execute([]);
-            foreach ($rsStmt->fetchAll(PDO::FETCH_COLUMN) as $rsId) { syncStackedPricesForUser($pdo, (int)$rsId); }
-        } catch (Throwable $e) {}
-        $toast = ['type' => 'success', 'msg' => "Reseller prices saved ($changed variants updated)!"];
-    }
-
     if ($act === 'save_user_custom_pricing_and_access' && !vpSubOwnsUser($pdo, (int)($_POST['target_user_id'] ?? 0))) {
         $toast = ['type' => 'error', 'msg' => 'This user does not belong to your store.'];
         $act = '';
     }
     if ($act === 'save_user_custom_pricing_and_access') {
         $userId = (int)$_POST['target_user_id'];
-        $role = in_array($_POST['user_role'] ?? '', ['customer', 'reseller']) ? $_POST['user_role'] : 'customer';
+        $role = 'user';
         $canAddFund = isset($_POST['can_add_fund']) ? 1 : 0;
 
         $pdo->prepare("UPDATE users SET role = ?, can_add_fund = ? WHERE id = ?")->execute([$role, $canAddFund, $userId]);
@@ -1793,8 +1734,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
 $storeUserFilter = "1=1";
 
 $totalUsers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $storeUserFilter")->fetchColumn() ?: 0);
-$totalCustomers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $storeUserFilter AND (role = 'customer' OR role IS NULL OR role = '')")->fetchColumn() ?: 0);
-$totalResellers = (int)($pdo->query("SELECT COUNT(*) FROM users WHERE $storeUserFilter AND role = 'reseller'")->fetchColumn() ?: 0);
+$totalCustomers = $totalUsers;
 $totalFunds = (float)($pdo->query("SELECT SUM(balance) FROM users WHERE $storeUserFilter")->fetchColumn() ?: 0.00);
 
 $todaySales = (float)($pdo->query("SELECT SUM(l.price) FROM licenses l WHERE DATE(l.created_at) = CURDATE()")->fetchColumn() ?: 0.00);
@@ -2049,6 +1989,19 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
         .btn-cyan { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%) !important; color: #fff !important; box-shadow: 0 10px 20px -10px rgba(79,70,229,.95), inset 0 1px 0 rgba(255,255,255,.25) !important; }
         .btn-emerald { color: #04130d !important; box-shadow: 0 10px 20px -10px rgba(16,185,129,.9), inset 0 1px 0 rgba(255,255,255,.25); }
         .btn-rose { box-shadow: 0 10px 20px -10px rgba(239,68,68,.9); }
+
+        /* ===== ⚙️ SETTINGS BUTTON BAR ===== */
+        .sp-bar { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+        .sp-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 12px 14px; border-radius: 16px; background: #0a111f; border: 1px solid #1a2745; color: #94a3b8; cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease; font-family: 'Plus Jakarta Sans', sans-serif; }
+        .sp-btn i { font-size: 17px; color: #818cf8; margin-bottom: 4px; }
+        .sp-btn b { font-size: 13px; color: #e2e8f0; font-weight: 800; }
+        .sp-btn small { font-size: 10.5px; color: #64748b; font-weight: 500; line-height: 1.25; }
+        .sp-btn:hover { transform: translateY(-2px); border-color: #3b5288; }
+        .sp-btn.active { background: linear-gradient(135deg, rgba(79,70,229,.30), rgba(59,130,246,.18)); border-color: #6366f1; box-shadow: 0 14px 28px -16px rgba(79,70,229,.9); }
+        .sp-btn.active i { color: #fff; }
+        .sp-btn.active small { color: #a5b4fc; }
+        .sp-link i { color: #34d399; }
+        .sp-link { border-style: dashed; }
         @media (max-width: 640px) {
             main { padding-left: 0.75rem !important; padding-right: 0.75rem !important; margin-top: 1rem !important; }
             .box-panel { padding: 1rem; border-radius: 16px; }
@@ -2128,12 +2081,9 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                     <i class="fa-solid fa-building-columns w-4 text-emerald-400"></i><span>Payment Gateways</span>
                 </button>
 
-                <div class="nav-group">People</div>
-                <button id="btn-nav-tab-customers" onclick="switchAdminTab('tab-customers', 'Customers Management', this)" class="drawer-nav-btn">
-                    <i class="fa-solid fa-user-group w-4 text-sky-400"></i><span>Customers</span>
-                </button>
-                <button id="btn-nav-tab-resellers" onclick="switchAdminTab('tab-resellers', 'Resellers Hub', this)" class="drawer-nav-btn">
-                    <i class="fa-solid fa-users-gear w-4 text-indigo-400"></i><span>Resellers</span>
+                <div class="nav-group">Users</div>
+                <button id="btn-nav-tab-customers" onclick="switchAdminTab('tab-customers', 'Users Management', this)" class="drawer-nav-btn">
+                    <i class="fa-solid fa-user-group w-4 text-sky-400"></i><span>Users</span>
                 </button>
 
                 <div class="nav-group">Settings</div>
@@ -2204,9 +2154,9 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                     <span class="text-[10px] text-slate-500 font-sans">Live Completed Sales</span>
                 </div>
                 <div class="stat-card flex flex-col justify-between h-32">
-                    <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">TOTAL CUSTOMERS</span>
+                    <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">TOTAL USERS</span>
                     <h2 class="text-3xl font-black text-sky-400 mt-1"><?= $totalCustomers ?></h2>
-                    <span class="text-[10px] text-slate-500 font-sans">Resellers: <?= $totalResellers ?></span>
+                    <span class="text-[10px] text-slate-500 font-sans">Registered accounts</span>
                 </div>
                 <div class="stat-card flex flex-col justify-between h-32">
                     <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">DELIVERED LICENSES</span>
@@ -2229,7 +2179,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                     <div>
                         <h4 class="text-sm font-black text-white uppercase tracking-wider font-mono">Store Discount Engine</h4>
                         <div class="text-xs text-slate-400 font-mono mt-1">
-                            Set your store products, customers &amp; resellers stacked discounts with 1-click controls.
+                            Set product and user stacked discounts with 1-click controls.
                         </div>
                     </div>
                 </div>
@@ -2263,17 +2213,14 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
         <!-- 2. CENTRAL DISCOUNT MANAGEMENT HUB (3 SUB-SECTIONS)             -->
         <!-- =============================================================== -->
         <section id="tab-discounts" class="tab-section hidden space-y-5 font-mono">
-            <div class="box-panel p-2 grid grid-cols-4 gap-2 text-xs font-bold font-mono">
+            <div class="box-panel p-2 grid grid-cols-3 gap-2 text-xs font-bold font-mono">
                 <button type="button" onclick="switchDiscountSubTab('disc-view-products')" id="pill-disc-prods" class="py-3 px-2 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center gap-1.5 shadow-sm transition">
                     <i class="fa-solid fa-boxes-stacked text-sm"></i><span>Products</span>
                 </button>
                 <button type="button" onclick="switchDiscountSubTab('disc-view-customers')" id="pill-disc-custs" class="py-3 px-2 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition">
-                    <i class="fa-solid fa-user-group text-sm text-sky-400"></i><span>Customers</span>
+                    <i class="fa-solid fa-user-group text-sm text-sky-400"></i><span>Users</span>
                 </button>
-                <button type="button" onclick="switchDiscountSubTab('disc-view-resellers')" id="pill-disc-resells" class="py-3 px-2 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition">
-                    <i class="fa-solid fa-users-gear text-sm text-amber-400"></i><span>Resellers</span>
-                </button>
-                <button type="button" onclick="switchDiscountSubTab('disc-view-coupons')" id="pill-disc-coupons" class="py-3 px-2 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition">
+                                <button type="button" onclick="switchDiscountSubTab('disc-view-coupons')" id="pill-disc-coupons" class="py-3 px-2 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition">
                     <i class="fa-solid fa-ticket text-sm text-indigo-400"></i><span>Coupons</span>
                 </button>
             </div>
@@ -2371,14 +2318,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         </div>
 
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                                <label class="text-slate-300 block mb-1 font-bold">Who Can Use</label>
-                                <select name="user_role" id="cpFormRole" class="w-full bg-[#030612] border border-slate-800 p-2.5 rounded-xl text-indigo-300 font-bold outline-none">
-                                    <option value="all">Everyone</option>
-                                    <option value="customer">Customers only</option>
-                                    <option value="reseller">Resellers only</option>
-                                </select>
-                            </div>
+                            <input type="hidden" name="user_role" id="cpFormRole" value="all">
                             <div>
                                 <label class="text-slate-300 block mb-1 font-bold">Products</label>
                                 <select name="target_type" id="cpFormTarget" onchange="document.getElementById('cpProdBox').classList.toggle('hidden', this.value !== 'specific')" class="w-full bg-[#030612] border border-slate-800 p-2.5 rounded-xl text-amber-300 font-bold outline-none">
@@ -2458,7 +2398,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                                     <span>⏰ <?= $stTs ? date('d M y, h:i A', $stTs) : 'Now' ?> → <?= $exTs ? date('d M y, h:i A', $exTs) : 'No end' ?></span>
                                     <?php if ((float)($cp['min_spend'] ?? 0) > 0): ?><span>Min ৳<?= number_format((float)$cp['min_spend'], 0) ?></span><?php endif; ?>
                                     <?php if ($cp['discount_type'] === 'percent' && (float)($cp['max_discount'] ?? 0) > 0): ?><span>Max ৳<?= number_format((float)$cp['max_discount'], 0) ?></span><?php endif; ?>
-                                    <span><?= ($cp['user_role'] ?? 'all') === 'all' ? 'Everyone' : ucfirst($cp['user_role']) . 's' ?></span>
+                                    <span>Everyone</span>
                                     <span><?= empty($targets) ? 'All products' : htmlspecialchars(implode(', ', $targets)) ?></span>
                                 </div>
                                 <div class="flex flex-wrap gap-2 pt-1">
@@ -2664,17 +2604,17 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                     <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-3">
                         <div>
                             <h3 class="text-xs font-black text-sky-300 uppercase tracking-wider flex items-center gap-2">
-                                <i class="fa-solid fa-user-group text-sky-400"></i> CUSTOMERS STACKED DISCOUNT CONTROL
+                                <i class="fa-solid fa-user-group text-sky-400"></i> USERS STACKED DISCOUNT CONTROL
                             </h3>
                             <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">
-                                Extra customer discount stacks with product plan discount (e.g. 10% Plan + 5% Customer = 15% Total)!
+                                Extra user discount stacks with product plan discount (e.g. 10% Plan + 5% User = 15% Total)!
                             </span>
                         </div>
                     </div>
 
                     <!-- Bulk Customer Controls -->
                     <div class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 space-y-3">
-                        <span class="text-xs font-bold text-slate-300 uppercase block font-sans">⚡ Quick Action: All Store Customers</span>
+                        <span class="text-xs font-bold text-slate-300 uppercase block font-sans">⚡ Quick Action: All Users</span>
                         <div class="flex flex-col sm:flex-row items-center gap-2.5">
                             <form method="POST" class="flex items-center gap-2 w-full sm:w-auto">
                                 <input type="hidden" name="admin_action" value="apply_bulk_user_discount">
@@ -2686,17 +2626,17 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                                     <input type="number" step="0.5" min="0" max="99" name="discount_percent" required placeholder="e.g. 5" class="w-20 bg-transparent text-emerald-400 font-black text-sm outline-none">
                                 </div>
                                 <button type="submit" class="py-2.5 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 text-slate-950 text-xs uppercase font-black whitespace-nowrap shadow">
-                                    Apply To All Customers
+                                    Apply To All Users
                                 </button>
                             </form>
 
-                            <form method="POST" onsubmit="return confirm('Turn off all customer extra discounts?');" class="w-full sm:w-auto">
+                            <form method="POST" onsubmit="return confirm('Turn off all user extra discounts?');" class="w-full sm:w-auto">
                                 <input type="hidden" name="admin_action" value="reset_all_user_discounts">
                                 <input type="hidden" name="active_tab" value="tab-discounts">
                                 <input type="hidden" name="disc_sub_tab" value="disc-view-customers">
                                 <input type="hidden" name="target_role" value="customer">
                                 <button type="submit" class="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-red-950/40 border border-red-500/30 text-red-400 hover:bg-red-900/40 text-xs uppercase font-bold transition">
-                                    <i class="fa-solid fa-power-off mr-1"></i> Turn Off All Customer Discounts (0%)
+                                    <i class="fa-solid fa-power-off mr-1"></i> Turn Off All User Discounts (0%)
                                 </button>
                             </form>
                         </div>
@@ -2704,18 +2644,18 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
 
                     <!-- Search Filter for Customers -->
                     <div class="relative pt-1">
-                        <input type="text" id="discCustomerSearchInput" onkeyup="filterDiscUsers('customer')" placeholder="Search customer by username or email..." class="w-full bg-[#030612] border border-slate-800 text-xs text-white rounded-xl p-3 pl-10 outline-none focus:border-sky-400">
+                        <input type="text" id="discCustomerSearchInput" onkeyup="filterDiscUsers('customer')" placeholder="Search user by username or email..." class="w-full bg-[#030612] border border-slate-800 text-xs text-white rounded-xl p-3 pl-10 outline-none focus:border-sky-400">
                         <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none mt-0.5"></i>
                     </div>
 
                     <!-- Customers List -->
                     <div class="space-y-2.5" id="discCustomerListContainer">
                         <?php if (empty($usersList)): ?>
-                            <p class="text-center py-6 text-slate-500 text-xs italic font-sans font-mono">No customers registered on this store yet.</p>
+                            <p class="text-center py-6 text-slate-500 text-xs italic font-sans font-mono">No users registered yet.</p>
                         <?php else: ?>
                             <?php foreach ($usersList as $u): 
                                 $uRole = strtolower(trim((string)($u['role'] ?? 'customer')));
-                                if ($uRole === 'reseller' || $uRole === 'admin') continue;
+                                
                                 $uDisc = (float)($u['discount_percent'] ?? 0);
                             ?>
                                 <div class="stat-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs disc-user-card"
@@ -2771,118 +2711,6 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                 </div>
             </div>
 
-            <!-- SUB-SECTION 3: RESELLERS DISCOUNT (WITH SEARCH & STACKING) -->
-            <div id="disc-view-resellers" class="hidden space-y-4">
-                <div class="box-panel p-5 space-y-4 border-amber-500/25">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-3">
-                        <div>
-                            <h3 class="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-2">
-                                <i class="fa-solid fa-users-gear text-amber-400"></i> RESELLERS STACKED DISCOUNT CONTROL
-                            </h3>
-                            <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">
-                                Set wholesale tier discounts. Automatically stacks with each product's base discount!
-                            </span>
-                        </div>
-                    </div>
-
-                    <!-- Bulk Reseller Controls -->
-                    <div class="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 space-y-3">
-                        <span class="text-xs font-bold text-slate-300 uppercase block font-sans">⚡ Quick Action: All Store Resellers</span>
-                        <div class="flex flex-col sm:flex-row items-center gap-2.5">
-                            <form method="POST" class="flex items-center gap-2 w-full sm:w-auto">
-                                <input type="hidden" name="admin_action" value="apply_bulk_user_discount">
-                                <input type="hidden" name="active_tab" value="tab-discounts">
-                                <input type="hidden" name="disc_sub_tab" value="disc-view-resellers">
-                                <input type="hidden" name="target_role" value="reseller">
-                                <div class="flex items-center bg-[#030612] px-3 py-2 rounded-xl border border-slate-800">
-                                    <span class="text-amber-400 font-bold text-xs mr-2">Extra % Disc:</span>
-                                    <input type="number" step="0.5" min="0" max="99" name="discount_percent" required placeholder="e.g. 10" class="w-20 bg-transparent text-emerald-400 font-black text-sm outline-none">
-                                </div>
-                                <button type="submit" class="py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-xs uppercase font-black whitespace-nowrap shadow">
-                                    Apply To All Resellers
-                                </button>
-                            </form>
-
-                            <form method="POST" onsubmit="return confirm('Turn off all reseller extra discounts?');" class="w-full sm:w-auto">
-                                <input type="hidden" name="admin_action" value="reset_all_user_discounts">
-                                <input type="hidden" name="active_tab" value="tab-discounts">
-                                <input type="hidden" name="disc_sub_tab" value="disc-view-resellers">
-                                <input type="hidden" name="target_role" value="reseller">
-                                <button type="submit" class="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-red-950/40 border border-red-500/30 text-red-400 hover:bg-red-900/40 text-xs uppercase font-bold transition">
-                                    <i class="fa-solid fa-power-off mr-1"></i> Turn Off All Reseller Discounts (0%)
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-
-                    <!-- Search Filter for Resellers -->
-                    <div class="relative pt-1">
-                        <input type="text" id="discResellerSearchInput" onkeyup="filterDiscUsers('reseller')" placeholder="Search reseller by username or email..." class="w-full bg-[#030612] border border-slate-800 text-xs text-white rounded-xl p-3 pl-10 outline-none focus:border-amber-400">
-                        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none mt-0.5"></i>
-                    </div>
-
-                    <!-- Resellers List -->
-                    <div class="space-y-2.5" id="discResellerListContainer">
-                        <?php if ($totalResellers === 0): ?>
-                            <p class="text-center py-6 text-slate-500 text-xs italic font-sans font-mono">No resellers registered on this store yet.</p>
-                        <?php else: ?>
-                            <?php foreach ($usersList as $u): 
-                                $uRole = strtolower(trim((string)($u['role'] ?? '')));
-                                if ($uRole !== 'reseller') continue;
-                                $uDisc = (float)($u['discount_percent'] ?? 0);
-                            ?>
-                                <div class="stat-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs disc-user-card"
-                                     data-username="<?= strtolower(htmlspecialchars($u['username'] ?? '')) ?>"
-                                     data-email="<?= strtolower(htmlspecialchars($u['email'] ?? '')) ?>">
-                                    <div>
-                                        <div class="flex items-center space-x-2.5">
-                                            <h4 class="font-bold text-white text-sm"><?= htmlspecialchars($u['username']) ?></h4>
-                                            <?php if ($uDisc > 0): ?>
-                                                <span class="text-[9px] px-2 py-0.5 rounded font-black font-mono uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                                    +<?= $uDisc ?>% Stacked Disc
-                                                </span>
-                                            <?php else: ?>
-                                                <span class="text-[9px] px-2 py-0.5 rounded font-bold font-mono uppercase bg-slate-800 text-slate-400">
-                                                    Regular (0%)
-                                                </span>
-                                            <?php endif; ?>
-                                        </div>
-                                        <div class="flex items-center space-x-3 mt-1 font-mono text-[11px] text-slate-400">
-                                            <span><?= htmlspecialchars($u['email'] ?: 'No Gmail') ?></span>
-                                            <span>Wallet: <strong class="text-emerald-400">$<?= number_format((float)$u['balance'], 2) ?></strong></span>
-                                        </div>
-                                    </div>
-
-                                    <div class="flex items-center space-x-2 font-mono flex-shrink-0">
-                                        <form method="POST" class="inline-flex items-center space-x-1.5">
-                                            <input type="hidden" name="admin_action" value="apply_single_user_discount">
-                                            <input type="hidden" name="active_tab" value="tab-discounts">
-                                            <input type="hidden" name="disc_sub_tab" value="disc-view-resellers">
-                                            <input type="hidden" name="target_user_id" value="<?= $u['id'] ?>">
-                                            <input type="number" step="0.5" min="0" max="99" name="discount_percent" value="<?= $uDisc > 0 ? $uDisc : '' ?>" placeholder="0" class="w-14 bg-[#030612] border border-slate-800 p-1.5 rounded-lg text-amber-300 font-bold text-center text-xs outline-none">
-                                            <button type="submit" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold hover:bg-amber-500/30 text-xs">Set %</button>
-                                        </form>
-
-                                        <?php if ($uDisc > 0): ?>
-                                            <form method="POST" class="inline">
-                                                <input type="hidden" name="admin_action" value="reset_single_user_discount">
-                                                <input type="hidden" name="active_tab" value="tab-discounts">
-                                                <input type="hidden" name="disc_sub_tab" value="disc-view-resellers">
-                                                <input type="hidden" name="target_user_id" value="<?= $u['id'] ?>">
-                                                <button type="submit" class="px-2.5 py-1.5 rounded-lg bg-red-950/40 text-red-400 border border-red-500/20 font-bold hover:bg-red-900/40 text-xs" title="Turn off discount">Off</button>
-                                            </form>
-                                        <?php endif; ?>
-
-                                        <button type="button" onclick="openUserAccessModal(<?= htmlspecialchars(json_encode($u)) ?>)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-xs font-bold transition">
-                                            Plan Custom $
-                                        </button>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
         </section>
 
         <!-- 3. PRODUCTS CATALOG TAB (FULL CATALOG + ADD PRODUCT + STOCK VAULT) -->
@@ -3020,7 +2848,6 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                                     </div>
                                     <?php foreach ($prod['plans'] as $pl): 
                                         $bdtP = round((float)$pl['user_price'] * $effectiveBdtRate, 0);
-                                        $plResP = (float)($pl['reseller_price'] ?? 0);
                                         $rCoins = (int)($pl['reward_coins'] ?? 0);
                                         $cPrice = (int)($pl['coin_price'] ?? 0);
                                         $plDisc = (float)($pl['discount_percent'] ?? 0);
@@ -3041,18 +2868,13 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
-                                            <div class="grid grid-cols-2 gap-2 sm:w-64 flex-shrink-0">
+                                            <div class="grid grid-cols-1 gap-2 sm:w-40 flex-shrink-0">
                                                 <label class="block">
-                                                    <span class="text-[9px] text-blue-300 font-bold block mb-0.5">👤 Customer $</span>
+                                                    <span class="text-[9px] text-blue-300 font-bold block mb-0.5">💲 Price $</span>
                                                     <input type="number" step="0.01" min="0.01" name="qp_user[<?= (int)$pl['id'] ?>]" value="<?= number_format((float)$pl['user_price'], 2, '.', '') ?>" oninput="qpBdt(this)" data-rate="<?= (float)$effectiveBdtRate ?>" class="w-full bg-[#030612] border border-blue-500/30 p-1.5 rounded-lg text-blue-300 font-mono font-bold text-xs outline-none text-right">
                                                     <span class="qp-bdt text-[9px] text-slate-500 font-mono block text-right">≈ ৳<?= number_format($bdtP, 0) ?></span>
                                                 </label>
-                                                <label class="block">
-                                                    <span class="text-[9px] text-emerald-300 font-bold block mb-0.5">🏪 Reseller $</span>
-                                                    <input type="number" step="0.01" min="0.01" name="qp_res[<?= (int)$pl['id'] ?>]" value="<?= $plResP > 0 ? number_format($plResP, 2, '.', '') : '' ?>" placeholder="<?= number_format((float)$pl['user_price'], 2, '.', '') ?>" oninput="qpBdt(this)" data-rate="<?= (float)$effectiveBdtRate ?>" class="w-full bg-[#030612] border border-emerald-500/30 p-1.5 rounded-lg text-emerald-300 font-mono font-bold text-xs outline-none text-right">
-                                                    <span class="qp-bdt text-[9px] text-slate-500 font-mono block text-right"><?= $plResP > 0 ? '≈ ৳' . number_format($plResP * $effectiveBdtRate, 0) : 'same as customer' ?></span>
-                                                </label>
-                                            </div>
+                                                </div>
                                         </div>
                                     <?php endforeach; ?>
                                     <button type="submit" class="w-full py-2.5 rounded-xl btn-cyan uppercase text-[11px] font-black tracking-wider">💾 Save Prices</button>
@@ -3499,7 +3321,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             <div class="box-panel p-2 grid grid-cols-2 gap-2 text-xs font-bold">
                 <button type="button" onclick="switchDepositSubView('dep-verify-sec')" id="pill-dep-verify" class="py-3 px-3 rounded-xl bg-teal-500 text-slate-950 font-black flex items-center justify-center gap-2 shadow-sm transition">
                     <i class="fa-solid fa-receipt text-sm"></i>
-                    <span>STORE CUSTOMER DEPOSITS</span>
+                    <span>STORE USER DEPOSITS</span>
                 </button>
                 <button type="button" onclick="switchDepositSubView('dep-rewards-sec')" id="pill-dep-rewards" class="py-3 px-3 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-2 transition">
                     <i class="fa-solid fa-gift text-sm text-amber-400"></i>
@@ -3512,9 +3334,9 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                 <div class="flex items-center justify-between pb-3 border-b border-slate-800">
                     <div>
                         <h3 class="text-xs font-bold text-teal-400 uppercase tracking-wider flex items-center gap-2">
-                            <i class="fa-solid fa-wallet"></i> VERIFY CUSTOMER DEPOSITS
+                            <i class="fa-solid fa-wallet"></i> VERIFY USER DEPOSITS
                         </h3>
-                        <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">Review store customer deposits and wallet allocations.</span>
+                        <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">Review user deposits and wallet allocations.</span>
                     </div>
                     <span class="px-3 py-1 rounded-xl text-[11px] font-bold uppercase bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
                         QUEUE: <?= $pendingTrxCount ?> PENDING
@@ -3698,15 +3520,15 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             </div>
         </section>
 
-        <!-- 10. CUSTOMERS DIRECTORY TAB -->
+        <!-- 10. USERS DIRECTORY TAB -->
         <section id="tab-customers" class="tab-section hidden space-y-5">
             <div class="box-panel p-5 space-y-4">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-3 font-mono">
                     <div>
                         <h3 class="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-2">
-                            <i class="fa-solid fa-user-group"></i> CUSTOMERS DIRECTORY (<?= $totalCustomers ?>)
+                            <i class="fa-solid fa-user-group"></i> USERS DIRECTORY (<?= $totalCustomers ?>)
                         </h3>
-                        <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">Direct registered customers on your store platform. Manage balance, coins &amp; access.</span>
+                        <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">All registered users of your store. Manage balance, coins &amp; access.</span>
                     </div>
                 </div>
 
@@ -3717,11 +3539,11 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
 
                 <div class="space-y-2.5" id="customerListContainer">
                     <?php if (empty($usersList)): ?>
-                        <p class="text-center py-8 text-slate-500 text-xs italic font-sans font-mono">No customers registered on your store yet.</p>
+                        <p class="text-center py-8 text-slate-500 text-xs italic font-sans font-mono">No users registered yet.</p>
                     <?php else: ?>
                         <?php foreach ($usersList as $u): 
                             $uRole = strtolower(trim((string)($u['role'] ?? 'customer')));
-                            if ($uRole === 'reseller' || $uRole === 'admin') continue;
+                            
                             $uDisc = (float)($u['discount_percent'] ?? 0);
                         ?>
                             <div class="stat-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs user-item-card"
@@ -3751,7 +3573,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                                         +/- Float &amp; Coins
                                     </button>
                                     <button type="button" onclick="openUserAccessModal(<?= htmlspecialchars(json_encode($u)) ?>)" class="px-3 py-2 rounded-xl bg-sky-500/20 text-sky-300 border border-sky-500/30 hover:bg-sky-500/30 text-xs font-bold transition">
-                                        Permissions &amp; Prices
+                                        Special Prices
                                     </button>
                                 </div>
                             </div>
@@ -3761,183 +3583,24 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             </div>
         </section>
 
-        <!-- 11. RESELLERS DIRECTORY TAB -->
-        <section id="tab-resellers" class="tab-section hidden space-y-5">
-            <!-- 💰 RESELLER PRICE MANAGER: প্রতিটা প্রোডাক্ট × প্রতিটা ভেরিয়েন্ট -->
-            <div class="box-panel p-5 space-y-4 border-emerald-500/30">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800 font-mono">
-                    <div>
-                        <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                            <i class="fa-solid fa-tags"></i> RESELLER PRICE MANAGER
-                        </h3>
-                        <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">প্রতিটা প্রোডাক্টের প্রতিটা ভেরিয়েন্টের রিসেলার প্রাইস এখান থেকে এডিট করুন। সব রিসেলারের জন্য প্রযোজ্য (কারো কাস্টম প্রাইস থাকলে সেটাই আগে)।</span>
-                    </div>
-                    <span class="text-[10px] text-emerald-300 font-bold whitespace-nowrap">1 USD = ৳<?= htmlspecialchars((string)$effectiveBdtRate) ?></span>
-                </div>
-
-                <?php if (empty($productsData)): ?>
-                    <p class="text-center py-6 text-slate-500 text-xs font-sans">No products yet.</p>
-                <?php else: ?>
-                <div class="flex flex-wrap items-center gap-2 bg-slate-900/80 p-3 rounded-xl border border-slate-800 text-xs font-mono">
-                    <span class="text-slate-300 font-bold">⚡ Quick fill:</span>
-                    <span class="text-slate-400">Reseller =</span>
-                    <input type="number" id="rpQuickPercent" min="1" max="100" step="1" value="80" class="w-16 bg-[#030612] border border-slate-700 p-1.5 rounded-lg text-emerald-300 font-bold text-center outline-none">
-                    <span class="text-slate-400">% of customer price</span>
-                    <button type="button" onclick="rpQuickFill()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] uppercase">Fill All</button>
-                    <div class="relative w-full sm:w-auto sm:ml-auto">
-                        <input type="text" id="rpSearch" oninput="rpFilter(this.value)" placeholder="Search product..." class="w-full sm:w-48 bg-[#030612] border border-slate-700 p-1.5 pl-7 rounded-lg text-white outline-none text-xs">
-                        <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-[10px]"></i>
-                    </div>
-                </div>
-
-                <form method="POST" class="space-y-3" id="resellerPriceForm">
-                    <input type="hidden" name="admin_action" value="bulk_save_reseller_prices">
-                    <input type="hidden" name="active_tab" value="tab-resellers">
-                    <div class="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-                        <?php foreach ($productsData as $rpProd): if (empty($rpProd['plans'])) continue; ?>
-                            <div class="rp-prod-block rounded-2xl border border-slate-800 bg-[#050a1a] overflow-hidden" data-name="<?= htmlspecialchars(strtolower($rpProd['name'])) ?>">
-                                <div class="px-3 py-2 bg-slate-900/80 flex items-center justify-between gap-2">
-                                    <strong class="text-blue-300 text-xs uppercase truncate"><?= htmlspecialchars($rpProd['name']) ?></strong>
-                                    <span class="text-[9px] text-slate-500 font-mono whitespace-nowrap"><?= count($rpProd['plans']) ?> variants</span>
-                                </div>
-                                <div class="divide-y divide-slate-800/70">
-                                    <?php foreach ($rpProd['plans'] as $rpPl):
-                                        $rpUser = (float)($rpPl['user_price'] ?? 0);
-                                        $rpRes  = (float)($rpPl['reseller_price'] ?? 0);
-                                        $rpDisc = (float)($rpPl['reseller_discount_percent'] ?? 0);
-                                        $rpId   = (int)$rpPl['id'];
-                                    ?>
-                                    <div class="rp-row p-2.5 grid grid-cols-2 sm:grid-cols-12 gap-2 items-center text-xs" data-user="<?= $rpUser ?>" data-plan="<?= $rpId ?>">
-                                        <div class="col-span-2 sm:col-span-3 min-w-0">
-                                            <span class="text-white font-bold block truncate"><?= htmlspecialchars($rpPl['plan_title'] ?: ($rpPl['validity'] ?? 'Plan')) ?></span>
-                                            <span class="text-[10px] text-slate-400 font-mono">Customer: $<?= number_format($rpUser, 2) ?> <span class="text-slate-500">(৳<?= number_format($rpUser * $effectiveBdtRate, 0) ?>)</span></span>
-                                        </div>
-                                        <label class="sm:col-span-3 flex items-center bg-slate-900 border border-emerald-500/30 rounded-lg px-2 py-1">
-                                            <span class="text-[10px] text-emerald-400 font-bold mr-1 whitespace-nowrap">Reseller $</span>
-                                            <input type="number" step="0.01" min="0.01" name="rp_price[<?= $rpId ?>]" value="<?= $rpRes > 0 ? number_format($rpRes, 2, '.', '') : '' ?>" placeholder="<?= number_format($rpUser, 2, '.', '') ?>" oninput="rpCalc(<?= $rpId ?>)" id="rp_price_<?= $rpId ?>" class="w-full min-w-0 bg-transparent text-emerald-300 font-black text-right outline-none">
-                                        </label>
-                                        <label class="sm:col-span-2 flex items-center bg-slate-900 border border-indigo-500/30 rounded-lg px-2 py-1">
-                                            <span class="text-[10px] text-indigo-400 font-bold mr-1">Disc%</span>
-                                            <input type="number" step="0.5" min="0" max="99" name="rp_disc[<?= $rpId ?>]" value="<?= $rpDisc > 0 ? rtrim(rtrim(number_format($rpDisc, 2, '.', ''), '0'), '.') : '0' ?>" oninput="rpCalc(<?= $rpId ?>)" id="rp_disc_<?= $rpId ?>" class="w-full min-w-0 bg-transparent text-indigo-300 font-bold text-right outline-none">
-                                        </label>
-                                        <div class="col-span-2 sm:col-span-4 text-right font-mono">
-                                            <span class="text-[10px] text-slate-400">Reseller pays:</span>
-                                            <strong id="rp_final_<?= $rpId ?>" class="text-amber-300 text-xs">—</strong>
-                                            <span id="rp_margin_<?= $rpId ?>" class="block text-[9px] text-slate-500"></span>
-                                        </div>
-                                    </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                    <button type="submit" class="w-full py-3.5 btn-emerald rounded-xl uppercase text-xs font-black tracking-wider shadow-md">💾 Save All Reseller Prices</button>
-                </form>
-                <script>
-                    const RP_BDT_RATE = <?= (float)$effectiveBdtRate ?>;
-                    function rpCalc(id) {
-                        const row = document.querySelector('.rp-row[data-plan="' + id + '"]');
-                        if (!row) return;
-                        const userP = parseFloat(row.dataset.user) || 0;
-                        const pIn = document.getElementById('rp_price_' + id);
-                        const dIn = document.getElementById('rp_disc_' + id);
-                        const base = parseFloat(pIn.value) > 0 ? parseFloat(pIn.value) : userP;
-                        const disc = Math.min(99, Math.max(0, parseFloat(dIn.value) || 0));
-                        const fin = Math.max(0.01, base * (1 - disc / 100));
-                        document.getElementById('rp_final_' + id).textContent = '$' + fin.toFixed(2) + ' (৳' + Math.round(fin * RP_BDT_RATE).toLocaleString() + ')';
-                        const m = document.getElementById('rp_margin_' + id);
-                        if (userP > 0) {
-                            const off = Math.round((1 - fin / userP) * 100);
-                            m.textContent = off > 0 ? off + '% cheaper than customer' : (off < 0 ? '⚠ costlier than customer price!' : 'same as customer');
-                            m.className = 'block text-[9px] ' + (off < 0 ? 'text-rose-400' : 'text-slate-500');
-                        }
-                    }
-                    function rpQuickFill() {
-                        const pct = Math.min(100, Math.max(1, parseFloat(document.getElementById('rpQuickPercent').value) || 80));
-                        if (!confirm('সব ভেরিয়েন্টের Reseller $ = Customer price এর ' + pct + '% বসানো হবে (Disc% = 0)। Save চাপলে সেভ হবে। Continue?')) return;
-                        document.querySelectorAll('.rp-row').forEach(row => {
-                            if (row.closest('.rp-prod-block').style.display === 'none') return;
-                            const id = row.dataset.plan, userP = parseFloat(row.dataset.user) || 0;
-                            if (userP <= 0) return;
-                            document.getElementById('rp_price_' + id).value = (userP * pct / 100).toFixed(2);
-                            document.getElementById('rp_disc_' + id).value = 0;
-                            rpCalc(id);
-                        });
-                    }
-                    function rpFilter(q) {
-                        q = (q || '').toLowerCase().trim();
-                        document.querySelectorAll('.rp-prod-block').forEach(b => { b.style.display = (!q || b.dataset.name.includes(q)) ? '' : 'none'; });
-                    }
-                    document.querySelectorAll('.rp-row').forEach(r => rpCalc(r.dataset.plan));
-                </script>
-                <?php endif; ?>
-            </div>
-            <div class="box-panel p-5 space-y-4">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-3 font-mono">
-                    <div>
-                        <h3 class="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-2">
-                            <i class="fa-solid fa-users-gear"></i> RESELLERS DIRECTORY (<?= $totalResellers ?>)
-                        </h3>
-                        <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">Wholesale resellers registered under your store with custom pricing and permissions. Manage balance &amp; coins.</span>
-                    </div>
-                </div>
-
-                <div class="relative">
-                    <input type="text" id="resellerSearchInput" onkeyup="filterUserList('reseller')" placeholder="Search Resellers by Username or UID..." class="w-full bg-slate-900 border border-slate-800 text-xs text-white rounded-xl p-3 pl-10 outline-none focus:border-blue-400 font-mono">
-                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none"></i>
-                </div>
-
-                <div class="space-y-2.5" id="resellerListContainer">
-                    <?php if ($totalResellers === 0): ?>
-                        <p class="text-center py-8 text-slate-500 text-xs italic font-sans font-mono">No resellers assigned under your store yet.</p>
-                    <?php else: ?>
-                        <?php foreach ($usersList as $u): 
-                            $uRole = strtolower(trim((string)($u['role'] ?? '')));
-                            if ($uRole !== 'reseller') continue; 
-                            $uDisc = (float)($u['discount_percent'] ?? 0);
-                        ?>
-                            <div class="stat-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs user-item-card"
-                                 data-username="<?= strtolower(htmlspecialchars($u['username'] ?? '')) ?>"
-                                 data-email="<?= strtolower(htmlspecialchars($u['email'] ?? '')) ?>"
-                                 data-tg-id="<?= htmlspecialchars((string)($u['telegram_chat_id'] ?? ($u['telegram_id'] ?? ''))) ?>">
-                            <div>
-                                <div class="flex items-center space-x-2.5">
-                                    <h4 class="font-bold text-white text-sm"><?= htmlspecialchars($u['username']) ?></h4>
-                                    <span class="text-[9px] px-2 py-0.5 rounded font-bold font-mono uppercase <?= ($u['status'] ?? 'active') === 'active' ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/20' : 'bg-red-950 text-red-400 border border-red-500/20' ?>">
-                                        <?= $u['status'] ?? 'active' ?>
-                                    </span>
-                                    <?php if ($uDisc > 0): ?>
-                                        <span class="text-[9px] px-2 py-0.5 rounded font-black font-mono uppercase bg-indigo-950 text-indigo-300 border border-indigo-500/30">
-                                            +<?= $uDisc ?>% Stacked Disc
-                                        </span>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="flex items-center space-x-3 mt-1 font-mono text-[11px] text-slate-400">
-                                    <span><?= htmlspecialchars($u['email'] ?: 'No Gmail') ?></span>
-                                    <span>Wallet: <strong class="text-emerald-400">$<?= number_format((float)$u['balance'], 2) ?></strong></span>
-                                    <span>Coins: <strong class="text-amber-400">🪙 <?= number_format((int)($u['coins'] ?? 0)) ?></strong></span>
-                                </div>
-                            </div>
-                            <div class="flex items-center space-x-2 font-mono flex-shrink-0">
-                                <button type="button" onclick="openBalanceModal(<?= $u['id'] ?>, '<?= htmlspecialchars(addslashes($u['username'])) ?>', '<?= htmlspecialchars(addslashes($u['email'] ?? '')) ?>', <?= (float)$u['balance'] ?>, <?= (int)($u['coins'] ?? 0) ?>, '<?= $u['status'] ?? 'active' ?>')" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 text-xs font-bold transition">
-                                    +/- Float &amp; Coins
-                                </button>
-                                <button type="button" onclick="openUserAccessModal(<?= htmlspecialchars(json_encode($u)) ?>)" class="px-3 py-2 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/30 text-xs font-bold transition">
-                                    Wholesale &amp; Access
-                                </button>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-                </div>
-            </div>
-        </section>
-
         <!-- 12. STORE SETTINGS TAB (WITH BOT, SUPPORT, REFERRAL & POPUPS) -->
         <section id="tab-settings" class="tab-section hidden space-y-6">
+            <!-- ⚙️ SETTINGS BUTTON BAR — প্রতিটা বাটনে আলাদা কাজ -->
+            <div class="sp-bar">
+                <button type="button" class="sp-btn" data-pane="branding" onclick="showSettingsPane('branding')"><i class="fa-solid fa-store"></i><b>Branding &amp; Logo</b><small>Site name, logos, footer</small></button>
+                <button type="button" class="sp-btn" data-pane="maint" onclick="showSettingsPane('maint')"><i class="fa-solid fa-screwdriver-wrench"></i><b>Maintenance</b><small>Store pause &amp; product popup</small></button>
+                <button type="button" class="sp-btn" data-pane="support" onclick="showSettingsPane('support')"><i class="fa-solid fa-headset"></i><b>Support &amp; Social</b><small>Telegram, WhatsApp, links</small></button>
+                <button type="button" class="sp-btn" data-pane="categories" onclick="showSettingsPane('categories')"><i class="fa-solid fa-layer-group"></i><b>Categories</b><small>Store filter buttons</small></button>
+                <button type="button" class="sp-btn" data-pane="referral" onclick="showSettingsPane('referral')"><i class="fa-solid fa-gift"></i><b>Referral</b><small>Token &amp; reward rules</small></button>
+                <button type="button" class="sp-btn" data-pane="popups" onclick="showSettingsPane('popups')"><i class="fa-solid fa-rectangle-ad"></i><b>Popups</b><small>Entry popup messages</small></button>
+                <button type="button" class="sp-btn" data-pane="banners" onclick="showSettingsPane('banners')"><i class="fa-solid fa-images"></i><b>Banners</b><small>Home slider images</small></button>
+                <button type="button" class="sp-btn sp-link" onclick="switchAdminTab('tab-themecolor','Store Theme Color',document.getElementById('btn-nav-tab-themecolor'))"><i class="fa-solid fa-palette"></i><b>Theme Color</b><small>Brand accent colour</small></button>
+                <button type="button" class="sp-btn sp-link" onclick="switchAdminTab('tab-adminaccess','Google Login (Firebase)',document.getElementById('btn-nav-tab-adminaccess'))"><i class="fa-brands fa-google"></i><b>Google Login</b><small>Firebase keys</small></button>
+            </div>
+
             
             <!-- A. BRANDING, MAINTENANCE & SUPPORT CONTACTS -->
-            <div class="box-panel p-5 space-y-5">
+            <div id="spFormBox" class="box-panel p-5 space-y-5">
                 <div class="pb-3 border-b border-slate-800">
                     <h3 class="text-xs font-bold text-yellow-400 uppercase tracking-wider font-mono">
                         <i class="fa-solid fa-sliders text-yellow-400 mr-1.5"></i> STORE BRANDING, SUPPORT &amp; MAINTENANCE
@@ -3948,12 +3611,13 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                     <input type="hidden" name="admin_action" value="update_branding_settings">
                     <input type="hidden" name="active_tab" value="tab-settings">
 
-                    <!-- Store-wide maintenance mode -->
+                    <div data-sp="maint" class="space-y-5 hidden">
+<!-- Store-wide maintenance mode -->
                     <div class="p-4 rounded-2xl border border-amber-500/30 bg-amber-950/20 space-y-3">
                         <div class="flex items-center justify-between">
                             <div>
                                 <span class="text-amber-300 font-bold text-xs block">Store-Wide Maintenance Mode</span>
-                                <span class="text-[10px] text-slate-400 font-sans">Pauses ALL purchases and shows your notice to customers.</span>
+                                <span class="text-[10px] text-slate-400 font-sans">Pauses ALL purchases and shows your notice to users.</span>
                             </div>
                             <input type="checkbox" name="site_maintenance_mode" value="1" <?= ($settings['site_maintenance_mode'] ?? '0') === '1' ? 'checked' : '' ?> class="rounded text-amber-500 scale-125 cursor-pointer">
                         </div>
@@ -3988,7 +3652,10 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                             <textarea name="maint_default_msg" rows="4" class="w-full bg-[#030612] border border-slate-800 p-2.5 rounded-xl text-white outline-none font-sans"><?= htmlspecialchars($settings['maint_default_msg'] ?? '') ?></textarea></div>
                     </div>
 
-                    <!-- Customer support contacts (any link) -->
+                    
+</div>
+<div data-sp="support" class="space-y-5 hidden">
+<!-- Customer support contacts (any link) -->
                     <div class="p-4 rounded-2xl border border-blue-500/30 bg-blue-950/20 space-y-3">
                         <span class="text-xs font-bold text-blue-300 uppercase block font-sans">
                             <i class="fa-solid fa-headset mr-1"></i> Customer Support Contacts
@@ -4007,7 +3674,10 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    
+</div>
+<div data-sp="branding" class="space-y-5 hidden">
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label class="text-slate-300 block mb-1 font-bold">Store / Site Name</label>
                             <input type="text" name="site_name" value="<?= htmlspecialchars($panelTitle) ?>" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white outline-none font-bold text-xs">
@@ -4048,7 +3718,10 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         </div>
                     </div>
 
-                    <div class="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-3">
+                    
+</div>
+<div data-sp="support" class="space-y-5 hidden">
+<div class="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-3">
                         <strong class="text-blue-300 text-xs block font-bold uppercase">Store Social Media Channels</strong>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <input type="url" name="footer_telegram_link" value="<?= htmlspecialchars($settings['footer_telegram_link'] ?? '') ?>" placeholder="Community / Channel Link" class="bg-[#030612] border border-slate-800 p-2.5 rounded-xl text-white outline-none">
@@ -4057,19 +3730,24 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         </div>
                     </div>
 
-                    <div>
+                    
+</div>
+<div data-sp="branding" class="space-y-5 hidden">
+<div>
                         <label class="text-slate-300 block mb-1 font-bold">Footer Copyright Notice</label>
                         <input type="text" name="footer_copyright_text" value="<?= htmlspecialchars($settings['footer_copyright_text'] ?? '') ?>" placeholder="&copy; 2026 My Store. All rights reserved." class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white outline-none">
                     </div>
 
-                    <button type="submit" class="w-full py-3 btn-cyan rounded-xl uppercase font-bold text-xs shadow-md">
-                        SAVE BRANDING &amp; SUPPORT SETTINGS
+                    
+</div>
+<button type="submit" class="w-full py-3 btn-cyan rounded-xl uppercase font-bold text-xs shadow-md">
+                        💾 SAVE SETTINGS
                     </button>
                 </form>
             </div>
 
             <!-- C. REFERRAL & TOKEN REWARDS SYSTEM  -->
-            <div class="box-panel p-5 space-y-4 border-amber-500/30 bg-gradient-to-r from-[#211202] to-[#070d20]">
+            <div data-sp="referral" class="hidden box-panel p-5 space-y-4 border-amber-500/30 bg-gradient-to-r from-[#211202] to-[#070d20]">
                 <div class="flex items-center justify-between pb-3 border-b border-slate-800">
                     <div>
                         <h3 class="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-2">
@@ -4110,7 +3788,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             </div>
 
             <!-- D. PRODUCT CATEGORIES SEQUENCE & ORDERING -->
-            <div class="box-panel p-5 space-y-4 border-indigo-500/30">
+            <div data-sp="categories" class="hidden box-panel p-5 space-y-4 border-indigo-500/30">
                 <div class="flex items-center justify-between pb-3 border-b border-slate-800">
                     <div>
                         <h3 class="text-xs font-black text-indigo-300 uppercase tracking-wider flex items-center gap-2">
@@ -4175,7 +3853,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             </div>
 
             <!-- E. CUSTOM ENTRY POP-UP MANAGER -->
-            <div class="box-panel p-5 space-y-4 border-indigo-500/30">
+            <div data-sp="popups" class="hidden box-panel p-5 space-y-4 border-indigo-500/30">
                 <div class="flex items-center justify-between pb-3 border-b border-slate-800">
                     <div>
                         <h3 class="text-xs font-black text-indigo-300 uppercase tracking-wider flex items-center gap-2">
@@ -4258,7 +3936,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             </div>
 
             <!-- F. PROMOTIONAL BANNERS CAROUSEL -->
-            <div class="box-panel p-5 space-y-4 font-mono">
+            <div data-sp="banners" class="hidden box-panel p-5 space-y-4 font-mono">
                 <h4 class="text-xs font-bold text-indigo-400 uppercase tracking-wider">PROMOTIONAL BANNERS SLIDER</h4>
                 <form method="POST" enctype="multipart/form-data" class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
                     <input type="hidden" name="admin_action" value="add_banner">
@@ -4306,8 +3984,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         <label class="text-slate-300 block mb-1 font-bold">Target Audience</label>
                         <select name="target_type" class="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-blue-300 outline-none">
                             <option value="all">Broadcast to All Store Users</option>
-                            <option value="customers">Customers Only</option>
-                            <option value="resellers">Resellers Only</option>
+                            <option value="user">One User (enter user ID below)</option>
                         </select>
                     </div>
 
@@ -4567,7 +4244,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         <div class="stat-card flex items-center justify-between">
                             <div>
                                 <span class="text-slate-200 font-bold text-xs block">Store Deposit System Master Switch</span>
-                                <span class="text-[10px] text-slate-400 font-sans">Open or temporarily close the Add Fund system for your customers</span>
+                                <span class="text-[10px] text-slate-400 font-sans">Open or temporarily close the Add Fund system for users</span>
                             </div>
                             <select name="deposit_system_status" class="bg-[#030612] border border-slate-800 p-2 rounded-xl text-xs font-bold <?= ($settings['deposit_system_status'] ?? '1') === '1' ? 'text-emerald-400' : 'text-red-400' ?> outline-none">
                                 <option value="1" <?= ($settings['deposit_system_status'] ?? '1') === '1' ? 'selected' : '' ?>>ONLINE (OPEN)</option>
@@ -5094,29 +4771,11 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                 <input type="hidden" id="modalAccessActiveTab" name="active_tab" value="tab-customers">
 
                 <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="text-slate-300 block mb-1 font-bold">Account Role</label>
-                        <select id="modalAccessUserRole" name="user_role" class="w-full bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-blue-300 font-bold outline-none">
-                            <option value="customer">Customer</option>
-                            <option value="reseller">Reseller</option>
-                        </select>
-                    </div>
+                    <input type="hidden" id="modalAccessUserRole" name="user_role" value="user">
 
                     <div class="bg-[#030712] p-2.5 rounded-xl border border-slate-800 flex items-center justify-between">
                         <span class="text-white block text-xs font-bold">Add Fund Button</span>
                         <input type="checkbox" id="modalAccessCanAddFund" name="can_add_fund" value="1" class="rounded text-emerald-400 scale-125">
-                    </div>
-                </div>
-
-                <div>
-                    <label class="text-slate-300 block mb-1 font-bold">Product Permissions</label>
-                    <div class="grid grid-cols-2 gap-2.5 bg-slate-900 p-3.5 rounded-2xl border border-slate-800 max-h-40 overflow-y-auto">
-                        <?php foreach ($productsData as $pd): ?>
-                            <label class="flex items-center space-x-2 text-[11px] text-slate-300 cursor-pointer">
-                                <input type="checkbox" name="allowed_products[]" value="<?= $pd['id'] ?>" class="user-prod-checkbox rounded text-blue-500 scale-110">
-                                <span class="truncate"><?= htmlspecialchars($pd['name']) ?></span>
-                            </label>
-                        <?php endforeach; ?>
                     </div>
                 </div>
 
@@ -5297,17 +4956,15 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             document.getElementById('paymentMethodModal').classList.remove('hidden');
         }
 
-        // DISCOUNT HUB SUB-TABS (ALL PRODUCTS / CUSTOMERS / RESELLERS / COUPONS)
+        // DISCOUNT HUB SUB-TABS (ALL PRODUCTS / USERS / COUPONS)
         function switchDiscountSubTab(viewId) {
             document.getElementById('disc-view-products').classList.add('hidden');
             document.getElementById('disc-view-customers').classList.add('hidden');
-            document.getElementById('disc-view-resellers').classList.add('hidden');
             const cBox = document.getElementById('disc-view-coupons');
             if (cBox) cBox.classList.add('hidden');
 
             document.getElementById('pill-disc-prods').className = "py-3 px-2 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition";
             document.getElementById('pill-disc-custs').className = "py-3 px-2 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition";
-            document.getElementById('pill-disc-resells').className = "py-3 px-2 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition";
             const cPill = document.getElementById('pill-disc-coupons');
             if (cPill) cPill.className = "py-3 px-2 rounded-xl text-slate-400 hover:text-white flex items-center justify-center gap-1.5 transition";
 
@@ -5317,10 +4974,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                 document.getElementById('pill-disc-prods').className = "py-3 px-2 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center gap-1.5 shadow-sm transition";
             } else if (viewId === 'disc-view-customers') {
                 document.getElementById('pill-disc-custs').className = "py-3 px-2 rounded-xl bg-sky-500 text-slate-950 font-black flex items-center justify-center gap-1.5 shadow-sm transition";
-            } else if (viewId === 'disc-view-resellers') {
-                document.getElementById('pill-disc-resells').className = "py-3 px-2 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center gap-1.5 shadow-sm transition";
-            } else if (viewId === 'disc-view-coupons') {
-                if (cPill) cPill.className = "py-3 px-2 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center gap-1.5 shadow-sm transition";
+                            if (cPill) cPill.className = "py-3 px-2 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center gap-1.5 shadow-sm transition";
             }
 
             sessionStorage.setItem('sub_disc_active_subtab', viewId);
@@ -5339,8 +4993,8 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
 
         // Search Filter for Users in Discount Hub
         function filterDiscUsers(role) {
-            const inputId = (role === 'customer') ? 'discCustomerSearchInput' : 'discResellerSearchInput';
-            const containerId = (role === 'customer') ? 'discCustomerListContainer' : 'discResellerListContainer';
+            const inputId = 'discCustomerSearchInput';
+            const containerId = 'discCustomerListContainer';
             const query = document.getElementById(inputId).value.trim().toLowerCase();
             const cards = document.getElementById(containerId).querySelectorAll('.disc-user-card');
 
@@ -5506,12 +5160,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         </div>
                         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-800/60">
                             <div>
-                                <label class="text-[9px] text-emerald-300 block font-bold">🏪 Reseller $</label>
-                                <input type="number" step="0.01" min="0.01" name="plan_reseller_price[${pl.id}]" value="${parseFloat(pl.reseller_price) > 0 ? parseFloat(pl.reseller_price).toFixed(2) : ''}" placeholder="${parseFloat(pl.user_price).toFixed(2)}" class="w-full bg-[#030612] border border-emerald-500/30 p-1.5 rounded-lg text-emerald-300 font-mono font-bold text-xs outline-none mt-0.5">
-                                <span class="text-[9px] text-slate-500 font-mono">≈ ৳${Math.round((parseFloat(pl.reseller_price) || 0) * currentBdtRate)} BDT</span>
-                            </div>
-                            <div>
-                                <label class="text-[9px] text-blue-300 block font-bold">👤 Customer $</label>
+                                <label class="text-[9px] text-blue-300 block font-bold">💲 Price $</label>
                                 <div class="flex items-center space-x-1 mt-0.5">
                                     <input type="number" step="0.01" name="plan_user_price[${pl.id}]" value="${parseFloat(pl.user_price).toFixed(2)}" class="w-full bg-[#030612] border border-slate-800 p-1.5 rounded-lg text-emerald-400 font-mono font-bold text-xs outline-none">
                                 </div>
@@ -5560,8 +5209,8 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
         }
 
         function filterUserList(role) {
-            const inputId = (role === 'customer') ? 'customerSearchInput' : 'resellerSearchInput';
-            const containerId = (role === 'customer') ? 'customerListContainer' : 'resellerListContainer';
+            const inputId = 'customerSearchInput';
+            const containerId = 'customerListContainer';
             const val = document.getElementById(inputId).value.trim().toLowerCase();
             const cards = document.getElementById(containerId).querySelectorAll('.user-item-card');
 
@@ -5581,14 +5230,9 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
         function openUserAccessModal(u) {
             document.getElementById('modalAccessUserId').value = u.id;
             document.getElementById('modalAccessUserName').innerText = u.username;
-            document.getElementById('modalAccessUserRole').value = u.role || 'customer';
-            document.getElementById('modalAccessActiveTab').value = (u.role === 'reseller') ? 'tab-resellers' : 'tab-customers';
+            
+            document.getElementById('modalAccessActiveTab').value = 'tab-customers';
             document.getElementById('modalAccessCanAddFund').checked = (parseInt(u.can_add_fund !== undefined ? u.can_add_fund : 1) === 1);
-
-            const allowed = userAllowedProdsMap[u.id] || [];
-            document.querySelectorAll('.user-prod-checkbox').forEach(cb => {
-                cb.checked = allowed.includes(parseInt(cb.value));
-            });
 
             const cPrices = userCustomPricesMap[u.id] || {};
             globalProducts.forEach(p => {
@@ -5730,5 +5374,21 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             <?php endif; ?>
         });
     </script>
+
+<script>
+(function () {
+    const formPanes = ['branding', 'maint', 'support'];
+    window.showSettingsPane = function (name) {
+        const root = document.getElementById('tab-settings'); if (!root) return;
+        root.querySelectorAll('[data-sp]').forEach(el => el.classList.toggle('hidden', el.dataset.sp !== name));
+        const box = document.getElementById('spFormBox'); if (box) box.classList.toggle('hidden', formPanes.indexOf(name) === -1);
+        root.querySelectorAll('.sp-btn[data-pane]').forEach(b => b.classList.toggle('active', b.dataset.pane === name));
+        try { sessionStorage.setItem('sp_active', name); } catch (e) {}
+    };
+    let start = 'branding';
+    try { start = sessionStorage.getItem('sp_active') || 'branding'; } catch (e) {}
+    showSettingsPane(start);
+})();
+</script>
 </body>
 </html>
