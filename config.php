@@ -11,7 +11,19 @@ date_default_timezone_set('Asia/Dhaka');
 
 define('DEBUG_MODE', false);          // true দিলে error দেখাবে (শুধু সমস্যা খোঁজার সময়), live সাইটে false রাখুন
 ini_set('display_errors', DEBUG_MODE ? '1' : '0');
+ini_set('log_errors', '1');
 error_reporting(DEBUG_MODE ? E_ALL : (E_ALL & ~E_DEPRECATED & ~E_NOTICE));
+
+// কোনো error হলে সাদা ৫০০ পেজের বদলে পরিষ্কার মেসেজ। DEBUG_MODE = true করলে আসল error দেখাবে।
+set_exception_handler(function (Throwable $e) {
+    error_log('[store] ' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    if (!headers_sent()) { http_response_code(500); header('Content-Type: text/html; charset=utf-8'); }
+    while (ob_get_level()) { @ob_end_clean(); }
+    echo DEBUG_MODE
+        ? '<pre style="white-space:pre-wrap;padding:16px;font:13px monospace">' . htmlspecialchars((string)$e) . '</pre>'
+        : '<div style="font-family:sans-serif;text-align:center;padding:60px 16px"><h2>Something went wrong</h2><p>Please try again in a moment.</p></div>';
+    exit;
+});
 
 // ====================================================================
 // 2. STORE IDENTITY
@@ -86,6 +98,8 @@ try {
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
+        // কিছু হোস্টে MySQL strict mode (ONLY_FULL_GROUP_BY ইত্যাদি) চালু থাকে — এতে ৫০০ error আসে। এটা বন্ধ রাখা হলো।
+        PDO::MYSQL_ATTR_INIT_COMMAND => "SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION'",
     ]);
 } catch (PDOException $e) {
     http_response_code(500);

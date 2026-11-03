@@ -2046,6 +2046,14 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             #adminDrawer > div:first-child > div:first-child > button { display: none; }
             main { max-width: 1180px !important; }
         }
+
+        /* ✨ buttons polish */
+        .btn-cyan, .btn-emerald, .btn-magenta, .btn-purple, .btn-rose { border-radius: 12px; letter-spacing: .04em; transition: transform .16s ease, filter .16s ease, box-shadow .16s ease; }
+        .btn-cyan:hover, .btn-emerald:hover, .btn-magenta:hover, .btn-purple:hover, .btn-rose:hover { filter: brightness(1.08); transform: translateY(-1px); }
+        .btn-cyan:active, .btn-emerald:active, .btn-magenta:active, .btn-purple:active, .btn-rose:active { transform: scale(.97); }
+        .btn-cyan { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%) !important; color: #fff !important; box-shadow: 0 10px 20px -10px rgba(79,70,229,.95), inset 0 1px 0 rgba(255,255,255,.25) !important; }
+        .btn-emerald { color: #04130d !important; box-shadow: 0 10px 20px -10px rgba(16,185,129,.9), inset 0 1px 0 rgba(255,255,255,.25); }
+        .btn-rose { box-shadow: 0 10px 20px -10px rgba(239,68,68,.9); }
         @media (max-width: 640px) {
             main { padding-left: 0.75rem !important; padding-right: 0.75rem !important; margin-top: 1rem !important; }
             .box-panel { padding: 1rem; border-radius: 16px; }
@@ -3993,14 +4001,14 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         </span>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
-                                <label class="text-blue-400 block mb-1 font-bold">Support Link (Telegram / Messenger / any URL)</label>
-                                <input type="text" name="support_telegram" value="<?= htmlspecialchars($settings['support_telegram'] ?? '') ?>" placeholder="https://..." class="w-full bg-[#030612] border border-slate-800 p-2.5 rounded-xl text-white outline-none focus:border-blue-400">
-                                <span class="text-[9px] text-slate-400 mt-1 block">Shown on the maintenance popup, support chat and footer.</span>
+                                <label class="text-blue-400 block mb-1 font-bold">Telegram Support (username or t.me link)</label>
+                                <input type="text" name="support_telegram" value="<?= htmlspecialchars($settings['support_telegram'] ?? '') ?>" placeholder="@username  or  https://t.me/username" class="w-full bg-[#030612] border border-slate-800 p-2.5 rounded-xl text-white outline-none focus:border-blue-400">
+                                <span class="text-[9px] text-slate-400 mt-1 block">এটা দিলে স্টোরে Telegram সাপোর্ট বাটন আসবে; খালি রাখলে বাটন আসবে না।</span>
                             </div>
                             <div>
                                 <label class="text-emerald-400 block mb-1 font-bold">Your WhatsApp Number / Link</label>
                                 <input type="text" name="support_whatsapp" value="<?= htmlspecialchars($settings['support_whatsapp'] ?? '') ?>" placeholder="+8801700000000 or WhatsApp link" class="w-full bg-[#030612] border border-slate-800 p-2.5 rounded-xl text-white outline-none focus:border-emerald-400">
-                                <span class="text-[9px] text-slate-400 mt-1 block">Direct WhatsApp chat button for your store customers.</span>
+                                <span class="text-[9px] text-slate-400 mt-1 block">এটা দিলে স্টোরে WhatsApp সাপোর্ট বাটন আসবে; খালি রাখলে বাটন আসবে না।</span>
                             </div>
                         </div>
                     </div>
@@ -4115,7 +4123,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                             <i class="fa-solid fa-layer-group text-indigo-400"></i> PRODUCT CATEGORIES ORDER / SEQUENCE
                         </h3>
                         <span class="text-[10px] text-slate-400 font-sans mt-0.5 block">
-                            Set display sequence on your store client view (e.g. 1=NONROOT, 2=ROOT, 3=IPHONE, 4=PC, 5=OTHER).
+                            এখানে যে category যোগ করবেন শুধু সেগুলোই স্টোরে ফিল্টার বাটন (ALL + আপনার category) হয়ে আসবে। কোনো category না দিলে ফিল্টার বাটন আসবে না। যেমন: NONROOT, ROOT, IPHONE।
                         </span>
                     </div>
                 </div>

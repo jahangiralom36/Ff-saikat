@@ -174,6 +174,23 @@ if (empty($tenantWhatsapp) && !empty($settings['support_whatsapp'])) {
     $tenantWhatsapp = trim($settings['support_whatsapp']);
 }
 
+// 💬 সাপোর্ট বাটন: admin → Site Settings এ Telegram / WhatsApp দিলে তবেই দেখাবে, না দিলে কিছুই আসবে না
+$supportTgUrl = '';
+$__tg = trim((string)$tenantTelegram);
+if ($__tg !== '') {
+    if (preg_match('#^https?://#i', $__tg))                    $supportTgUrl = $__tg;
+    elseif (preg_match('#^(t\.me|telegram\.me)/#i', $__tg))   $supportTgUrl = 'https://' . $__tg;
+    else                                                       $supportTgUrl = 'https://t.me/' . ltrim($__tg, '@');
+}
+$supportWaUrl = '';
+$__wa = trim((string)$tenantWhatsapp);
+if ($__wa !== '') {
+    if (preg_match('#^https?://#i', $__wa))      $supportWaUrl = $__wa;
+    elseif (stripos($__wa, 'wa.me/') === 0)     $supportWaUrl = 'https://' . $__wa;
+    else { $__d = preg_replace('/[^0-9]/', '', $__wa); if ($__d !== '') $supportWaUrl = 'https://wa.me/' . $__d; }
+}
+$supportBtnCount = ($supportTgUrl !== '' ? 1 : 0) + ($supportWaUrl !== '' ? 1 : 0);
+
 // সাইট কালার: সাব-ডোমেইনের থিম কালার অথবা মাদার সেটিংস কালার
 $siteThemeColor = $settings['main_site_theme_color'] ?? '#3b82f6';
 $inrExchangeRate = max(1.0, (float)($settings['inr_rate'] ?? 88.0));
@@ -1982,7 +1999,7 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'get_spin_data') {
         try {
             $stmtLB = $pdo->prepare("SELECT u.username, SUM(l.price * ?) as spent_bdt
                 FROM licenses l JOIN users u ON l.user_id = u.id 
-                WHERE l.subdomain_id = ? GROUP BY u.id ORDER BY spent_bdt DESC LIMIT 3");
+                WHERE l.subdomain_id = ? GROUP BY u.id, u.username ORDER BY spent_bdt DESC LIMIT 3");
             $stmtLB->execute([$effectiveBdtRate, $currentSubdomainId]);
             $topBuyers = $stmtLB->fetchAll(PDO::FETCH_ASSOC);
         } catch (Throwable $e) {}
@@ -2480,7 +2497,7 @@ try {
     unset($cp);
 
     // BUILD ORDERED CATEGORY LIST: ALL -> NONROOT -> ROOT -> IPHONE -> PC -> OTHER -> (others)
-    $allDiscoveredCats = array_unique(array_merge($dynamicCategoriesFound, $discoveredFromProducts));
+    $allDiscoveredCats = array_values(array_unique($dynamicCategoriesFound)); // শুধু admin যেগুলো যোগ করেছে
     $orderedCategories = [];
 
     foreach ($preferredCategoryOrder as $pCat) {
@@ -2501,7 +2518,7 @@ try {
 
 } catch (Throwable $e) {
     $catalogProducts = [];
-    $availableCategories = ['ALL', 'NONROOT', 'ROOT', 'IPHONE', 'PC', 'OTHER'];
+    $availableCategories = ['ALL'];
 }
 
 $userNotifications = [];
@@ -2958,6 +2975,56 @@ overflow: hidden; }
         .mp-close { background: #0f172a; color: #fff; }
         .mp-support:active, .mp-close:active { transform: scale(.97); }
 
+        /* =====================================================================
+           ✨ PROFESSIONAL POLISH — buttons, dock, chips, support buttons
+           ===================================================================== */
+        .font-cyber { font-family: 'Plus Jakarta Sans', sans-serif !important; font-weight: 800; letter-spacing: .03em; }
+        .btn-buy-compact, .btn-magenta-glow {
+            background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%) !important; border-radius: 12px !important;
+            box-shadow: 0 10px 20px -10px rgba(79, 70, 229, .95), inset 0 1px 0 rgba(255,255,255,.28) !important;
+            letter-spacing: .06em; transition: transform .18s ease, box-shadow .18s ease, filter .18s ease !important;
+        }
+        .btn-buy-compact { padding: 8px 15px !important; }
+        .btn-buy-compact:hover, .btn-magenta-glow:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .btn-buy-compact:active, .btn-magenta-glow:active { transform: scale(.96); }
+        .maint-btn { border-radius: 12px !important; background: rgba(244, 63, 94, .1) !important; border: 1.5px solid rgba(244, 63, 94, .75) !important; color: #fda4af !important; box-shadow: none !important; }
+        .price-badge-buy-style { background: rgba(99, 102, 241, .14) !important; border: 1px solid rgba(129, 140, 248, .32); box-shadow: none !important; border-radius: 12px !important; }
+        .category-pill { border-radius: 999px !important; padding: 7px 17px !important; font-size: 12px !important; background: #0e1a30; border: 1px solid #1f3157; color: #a9b8d8; font-weight: 700; }
+        .category-pill:hover { color: #fff; border-color: #3b5288; }
+        .category-pill.active { background: linear-gradient(135deg, #4f46e5, #3b82f6) !important; color: #fff !important; border-color: transparent !important; box-shadow: 0 10px 20px -10px rgba(79, 70, 229, .95) !important; }
+        .product-card { border-radius: 22px; border-color: rgba(129, 140, 248, .22); box-shadow: 0 14px 30px -20px rgba(0, 0, 0, .9); }
+        .product-card:hover { box-shadow: 0 20px 36px -18px rgba(59, 130, 246, .45); }
+
+        /* ---- bottom dock ---- */
+        .nav-bottom-bar {
+            background: linear-gradient(180deg, rgba(22, 35, 64, .94), rgba(9, 15, 29, .97)) !important; border: 1px solid rgba(129, 140, 248, .26) !important;
+            border-radius: 28px !important; padding: 8px 10px !important; max-width: 25rem !important;
+            box-shadow: 0 22px 44px -14px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255,255,255,.07) !important;
+            backdrop-filter: blur(18px) saturate(140%) !important;
+        }
+        .bottom-nav-btn { position: relative; color: #8fa0c4; padding: 2px 0; transform: none !important; }
+        .bottom-nav-btn .nav-icon-wrap { width: 40px !important; height: 30px !important; border-radius: 12px !important; font-size: 15px !important; transition: all .25s ease; }
+        .bottom-nav-btn:hover .nav-icon-wrap { background: rgba(129, 140, 248, .14); color: #c7d2fe; }
+        .bottom-nav-btn.active { color: #fff; }
+        .bottom-nav-btn.active .nav-icon-wrap { background: linear-gradient(135deg, #4f46e5, #3b82f6); color: #fff; box-shadow: 0 10px 18px -8px rgba(79, 70, 229, .95); }
+        .bottom-nav-btn span, #bnav-addfund span { font-size: 10px !important; font-weight: 700 !important; letter-spacing: .2px; }
+        .center-fund-btn {
+            width: 52px !important; height: 52px !important; border-radius: 18px !important; font-size: 19px !important; color: #04101f !important;
+            background: linear-gradient(135deg, #34d399 0%, #3b82f6 100%) !important;
+            box-shadow: 0 14px 26px -8px rgba(52, 211, 153, .75), 0 0 0 5px rgba(9, 15, 29, .96) !important;
+            transform: translateY(-16px) !important; transition: transform .2s ease !important;
+        }
+        #bnav-addfund:active .center-fund-btn { transform: translateY(-14px) scale(.94) !important; }
+        #bnav-addfund span { margin-top: -12px !important; color: #6ee7b7 !important; }
+
+        /* ---- support buttons (Telegram / WhatsApp) ---- */
+        .support-fab-stack { position: fixed; right: 12px; bottom: 76px; z-index: 45; display: flex; flex-direction: column; gap: 10px; }
+        .support-fab { width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; color: #fff; text-decoration: none; transition: transform .2s ease; border: 2px solid rgba(255,255,255,.22); }
+        .support-fab:hover { transform: translateY(-2px) scale(1.05); }
+        .support-fab:active { transform: scale(.92); }
+        .support-fab.tg { background: linear-gradient(135deg, #38bdf8, #229ed9); box-shadow: 0 10px 22px -6px rgba(34, 158, 217, .8); }
+        .support-fab.wa { background: linear-gradient(135deg, #34d399, #16a34a); box-shadow: 0 10px 22px -6px rgba(22, 163, 74, .8); }
+
         .pay-method-choice-card {
             background: linear-gradient(135deg, #101b32 0%, #0a1220 100%);
             border: 1.5px solid #1d325c;
@@ -3404,8 +3471,7 @@ overflow: hidden; }
 
     <!-- 🔧 MAINTENANCE POPUP — সব লেখা admin → Site Settings → Maintenance থেকে এডিট হয় -->
     <?php
-        $mpSupportUrl = !empty($maintenanceTgLink) ? $maintenanceTgLink : (!empty($tenantTelegram) ? $tenantTelegram : '');
-        if ($mpSupportUrl === '' && !empty($tenantWhatsapp)) $mpSupportUrl = 'https://wa.me/' . preg_replace('/[^0-9]/', '', $tenantWhatsapp);
+        $mpSupportUrl = !empty($maintenanceTgLink) ? $maintenanceTgLink : ($supportTgUrl !== '' ? $supportTgUrl : $supportWaUrl);
     ?>
     <div id="maintPopup" data-default-msg="<?= htmlspecialchars($settings['maint_default_msg'] ?? '') ?>" class="fixed inset-0 z-[99990] hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" onclick="if(event.target===this) closeMaintPopup()">
         <div class="mp-card w-full max-w-md relative text-center">
@@ -3576,6 +3642,7 @@ overflow: hidden; }
             <?php endif; ?>
 
             <!-- 3. CATEGORY PILLS FILTER (EXACT SERIAL: ALL -> NONROOT -> ROOT -> IPHONE -> PC -> OTHER) -->
+            <?php if (count($availableCategories) > 1): ?>
             <div class="flex items-center space-x-1.5 overflow-x-auto pb-0.5 no-scrollbar text-xs font-mono font-bold">
                 <?php foreach ($availableCategories as $idx => $cat): ?>
                     <button type="button" onclick="filterByCategory('<?= $cat ?>', this)" class="category-pill <?= $idx === 0 ? 'active' : '' ?> px-3.5 py-1.5 rounded-xl flex items-center space-x-1 flex-shrink-0 text-[11px]">
@@ -3583,6 +3650,7 @@ overflow: hidden; }
                     </button>
                 <?php endforeach; ?>
             </div>
+            <?php endif; ?>
 
             <!-- 4. PRODUCTS GRID -->
             <?php if (empty($catalogProducts)): ?>
@@ -4996,80 +5064,24 @@ overflow: hidden; }
         </div>
     </div>
 
-    <!-- 13. FLOATING ACTION BUTTONS & AI ASSISTANT -->
+    <!-- 13. FLOATING ACTION BUTTONS (SPIN + SUPPORT) -->
     <?php if ($isSpinWheelActive): ?>
-    <div class="floating-spin-btn" onclick="handleSpinFloatingClick()" title="Lucky Spin &amp; Win Reward">
+    <div class="floating-spin-btn" style="bottom: <?= 78 + $supportBtnCount * 60 ?>px;" onclick="handleSpinFloatingClick()" title="Lucky Spin &amp; Win Reward">
         <i class="fa-solid fa-dharmachakra fa-spin text-xl text-yellow-400"></i>
         <span class="text-[8px] font-bold text-yellow-300 mt-0.5 font-mono">SPIN</span>
     </div>
     <?php endif; ?>
 
-    <div class="floating-chat-btn" onclick="toggleChatDialog()" title="Live Customer Support &amp; AI">
-        <i class="fa-solid fa-headset"></i>
+    <?php if ($supportBtnCount > 0): ?>
+    <div class="support-fab-stack">
+        <?php if ($supportWaUrl !== ''): ?>
+            <a href="<?= htmlspecialchars($supportWaUrl) ?>" target="_blank" rel="noopener" class="support-fab wa" title="WhatsApp Support" aria-label="WhatsApp Support"><i class="fa-brands fa-whatsapp"></i></a>
+        <?php endif; ?>
+        <?php if ($supportTgUrl !== ''): ?>
+            <a href="<?= htmlspecialchars($supportTgUrl) ?>" target="_blank" rel="noopener" class="support-fab tg" title="Telegram Support" aria-label="Telegram Support"><i class="fa-brands fa-telegram"></i></a>
+        <?php endif; ?>
     </div>
-
-    <div id="chatDialogBox" class="chat-dialog hidden font-mono">
-        <div class="p-3 bg-[#111d35] border-b border-blue-500/40 flex items-center justify-between">
-            <div class="flex items-center space-x-2">
-                <span class="w-7 h-7 rounded-full bg-blue-400 text-gray-950 flex items-center justify-center text-xs font-black shadow-md shadow-blue-400/50">
-                    <i class="fa-solid fa-headset"></i>
-                </span>
-                <div>
-                    <h4 class="text-xs font-black text-white leading-none font-sans">Support Assistant</h4>
-                    <span class="text-[8px] text-blue-300">Live 24/7 AI &amp; Admin</span>
-                </div>
-            </div>
-            <button onclick="toggleChatDialog()" class="text-gray-400 hover:text-white p-1">
-                <i class="fa-solid fa-xmark text-xs"></i>
-            </button>
-        </div>
-
-        <div class="flex bg-[#080e1a] p-1 border-b border-[#162747] text-[10px] font-bold">
-            <button onclick="switchChatTab('ai')" id="chatTabBtnAi" class="flex-1 py-1 rounded-lg bg-blue-500 text-gray-950 font-bold transition">Instant AI Help</button>
-            <button onclick="switchChatTab('tg')" id="chatTabBtnTg" class="flex-1 py-1 rounded-lg text-gray-400 hover:text-white transition">Contact Support</button>
-        </div>
-
-        <div id="chatSectionAi" class="p-2.5 space-y-2 text-xs">
-            <div id="chatMessageLog" class="space-y-1.5 max-h-52 overflow-y-auto pr-1 no-scrollbar">
-                <div class="bg-[#13213c] p-2 rounded-xl text-gray-200 leading-relaxed text-[10px] border border-blue-500/30 font-sans shadow-sm">
-                    👋 <b>Hello &amp; Welcome!</b> How can I assist you today? You can ask about <i>"Hi"</i>, product prices, how to deposit, or reset license keys!
-                </div>
-            </div>
-
-            <div class="flex items-center space-x-1.5 overflow-x-auto pt-0.5 no-scrollbar text-[8px]">
-                <button onclick="askAiQuestion('hi')" class="px-2.5 py-1 rounded-full bg-[#152544] border border-blue-500/40 text-blue-300 flex-shrink-0">👋 Hi</button>
-                <button onclick="askAiQuestion('balance')" class="px-2.5 py-1 rounded-full bg-[#152544] border border-emerald-500/40 text-emerald-300 flex-shrink-0">💰 Balance</button>
-                <?php if ($canAddFund === 1): ?>
-                    <button onclick="askAiQuestion('deposit')" class="px-2.5 py-1 rounded-full bg-[#152544] border border-indigo-500/40 text-indigo-300 flex-shrink-0">💳 Deposit</button>
-                <?php endif; ?>
-                <button onclick="askAiQuestion('reset key')" class="px-2.5 py-1 rounded-full bg-[#152544] border border-indigo-500/40 text-indigo-300 flex-shrink-0">🔄 Reset</button>
-            </div>
-
-            <form onsubmit="handleAiMessageSubmit(event)" class="flex items-center space-x-1 pt-0.5">
-                <input type="text" id="aiUserInput" placeholder="Type hi, price, deposit..." class="flex-grow bg-[#080e1a] border border-[#162747] px-2.5 py-1.5 rounded-lg text-white text-[10px] outline-none focus:border-blue-400 font-sans shadow-inner">
-                <button type="submit" class="w-7 h-7 rounded-lg bg-blue-400 text-gray-950 font-bold flex items-center justify-center hover:bg-blue-300 transition shadow">
-                    <i class="fa-solid fa-paper-plane text-[10px]"></i>
-                </button>
-            </form>
-        </div>
-
-        <div id="chatSectionTg" class="hidden p-3 text-center space-y-2.5 text-xs">
-            <p class="text-gray-300 text-[11px] font-sans">Need official support, key assistance or community updates?</p>
-            <?php if (!empty($tenantTelegram)): ?>
-                <a href="<?= htmlspecialchars($tenantTelegram) ?>" target="_blank" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 text-white font-black uppercase tracking-wider flex items-center justify-center gap-1.5 text-[11px] font-sans shadow-md">
-                    <i class="fa-solid fa-headset text-sm"></i> Contact Support
-                </a>
-            <?php endif; ?>
-            <?php if (!empty($tenantWhatsapp)): ?>
-                <a href="https://wa.me/<?= htmlspecialchars(preg_replace('/[^0-9]/', '', $tenantWhatsapp)) ?>" target="_blank" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-green-500 to-green-600 text-white font-black uppercase tracking-wider flex items-center justify-center gap-1.5 text-[11px] font-sans shadow-md">
-                    <i class="fa-brands fa-whatsapp text-sm"></i> WhatsApp Support
-                </a>
-            <?php endif; ?>
-            <?php if (empty($tenantTelegram) && empty($tenantWhatsapp)): ?>
-                <p class="text-[10px] text-gray-500 italic">Support contact not configured yet.</p>
-            <?php endif; ?>
-        </div>
-    </div>
+    <?php endif; ?>
 
     <!-- 14. BOTTOM NAVIGATION DOCK -->
     <nav class="fixed bottom-2.5 left-1/2 -translate-x-1/2 w-[94%] max-w-sm z-40 nav-bottom-bar px-2.5 py-1.5 flex items-center justify-between font-mono">
@@ -6459,80 +6471,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        // ===================== CHAT & AI ASSISTANT =====================
-        function toggleChatDialog() { document.getElementById('chatDialogBox')?.classList.toggle('hidden'); }
-        function switchChatTab(tab) {
-            const btnAi = document.getElementById('chatTabBtnAi');
-            const btnTg = document.getElementById('chatTabBtnTg');
-            const secAi = document.getElementById('chatSectionAi');
-            const secTg = document.getElementById('chatSectionTg');
-            if (tab === 'ai') {
-                btnAi.className = 'flex-1 py-1 rounded-lg bg-blue-500 text-gray-950 font-bold transition';
-                btnTg.className = 'flex-1 py-1 rounded-lg text-gray-400 hover:text-white transition';
-                secAi.classList.remove('hidden'); secTg.classList.add('hidden');
-            } else {
-                btnTg.className = 'flex-1 py-1 rounded-lg bg-blue-500 text-gray-950 font-bold transition';
-                btnAi.className = 'flex-1 py-1 rounded-lg text-gray-400 hover:text-white transition';
-                secTg.classList.remove('hidden'); secAi.classList.add('hidden');
-            }
-        }
-        function handleAiMessageSubmit(e) {
-            e.preventDefault();
-            const input = document.getElementById('aiUserInput');
-            const val = input.value.trim();
-            if (!val) return;
-            askAiQuestion(val);
-            input.value = '';
-        }
-        function askAiQuestion(query) {
-            const log = document.getElementById('chatMessageLog');
-            const userMsg = document.createElement('div');
-            userMsg.className = "bg-gradient-to-r from-blue-500 to-blue-600 text-gray-950 p-1.5 rounded-lg text-right font-bold text-[9px] ml-5 shadow font-sans";
-            userMsg.innerText = query;
-            log.appendChild(userMsg);
-            setTimeout(() => {
-                const aiMsg = document.createElement('div');
-                aiMsg.className = "bg-[#18294b] border border-blue-500/30 p-1.5 rounded-lg text-gray-200 leading-relaxed text-[9px] mr-3 space-y-1 font-sans";
-                const q = query.toLowerCase();
-                if (q.includes('hi') || q.includes('hello') || q.includes('hey')) {
-                    aiMsg.innerHTML = `👋 <b>Hello!</b> Ask me about <b>balance</b>, <b>coins</b>, <b>deposit</b>, <b>reset key</b>!`;
-                } else if (q.includes('balance') || q.includes('wallet') || q.includes('fund') || q.includes('coin')) {
-                    if (!isUserLoggedIn) {
-                        aiMsg.innerHTML = `🔒 <button onclick="openAuthModal('login'); toggleChatDialog();" class="text-blue-400 font-bold underline">Login</button> to check balance!`;
-                    } else {
-                        aiMsg.innerHTML = `💰 <b>Balances:</b><br>• <b>${formatDisplayPrice(userCurrentBalanceBdt)}</b><br>• <b>🪙 ${userCurrentCoins.toLocaleString()} Coins</b>`;
-                    }
-                } else if (q.includes('deposit') || q.includes('load') || q.includes('bkash')) {
-                    if (!isUserLoggedIn) aiMsg.innerHTML = `🔒 <button onclick="openAuthModal('login'); toggleChatDialog();" class="text-blue-400 font-bold underline">Login</button> to deposit!`;
-                    else if (isDepositSystemOnline) aiMsg.innerHTML = `💳 Tap <b>Add Fund</b> below, choose bKash/Nagad/Binance!`;
-                    else aiMsg.innerHTML = `⚠️ Deposit gateway paused.`;
-                } else if (q.includes('reset') || q.includes('hwid')) {
-                    if (!isUserLoggedIn) aiMsg.innerHTML = `🔒 <button onclick="openAuthModal('login'); toggleChatDialog();" class="text-blue-400 font-bold underline">Login</button> to reset!`;
-                    else aiMsg.innerHTML = `🔄 <button onclick="handleNavClick('resetkey'); toggleChatDialog();" class="text-blue-400 font-bold underline">Reset Key</button>`;
-                } else {
-                    let matches = [];
-                    for (let id in allProductsCatalog) {
-                        const p = allProductsCatalog[id];
-                        if (p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase())) matches.push(p);
-                    }
-                    if (matches.length > 0) {
-                        let html = `🎯 <b>Found ${matches.length}:</b><div class="space-y-0.5 mt-0.5">`;
-                        matches.slice(0, 2).forEach(p => {
-                            const minP_BDT = p.plans.length > 0 ? p.plans[0].price_bdt : 0;
-                            html += `<div class="p-1 bg-[#0b1424] rounded border border-[#233c6e] flex justify-between items-center"><div><strong class="text-white text-[9px] block truncate">${p.name}</strong><span class="text-[8px] text-emerald-400">From ${formatDisplayShort(minP_BDT)}</span></div><button onclick="openProductModal(${p.id}); toggleChatDialog();" class="px-1.5 py-0.2 rounded btn-buy-compact text-white text-[8px] font-bold">Buy</button></div>`;
-                        });
-                        html += `</div>`;
-                        aiMsg.innerHTML = html;
-                    } else {
-                        aiMsg.innerHTML = `🤖 No match for "<i>${query}</i>". Try our support!`;
-                    }
-                }
-                log.appendChild(aiMsg);
-                log.scrollTop = log.scrollHeight;
-            }, 200);
-        }
-
-        // ===================== UTILS =====================
         function showToast(msg, type = 'success') {
             const toast = document.getElementById('toastNotification');
             const toastInner = document.getElementById('toastInner');
