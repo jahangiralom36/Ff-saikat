@@ -3,13 +3,49 @@
 --
 -- কীভাবে ইম্পোর্ট করবেন:
 --   cPanel → phpMyAdmin → আপনার database সিলেক্ট → Import → এই ফাইল → Go
---   (একবারই করতে হবে। তারপর config.php তে DB_NAME / DB_USER / DB_PASS বসান।)
+--   তারপর config.php তে DB_NAME / DB_USER / DB_PASS বসান।
+--
+-- ⚠️ সতর্কতা: এই ফাইল ইম্পোর্ট করলে নিচের টেবিলগুলো আগে মুছে নতুন করে বানানো হয়।
+--    অর্থাৎ এই ডাটাবেজে আগের ডাটা (ইউজার, প্রোডাক্ট, অর্ডার) থাকলে মুছে যাবে।
+--    তাই চালু সাইটে আবার ইম্পোর্ট করবেন না — শুধু প্রথমবার সেটআপের সময় করুন।
 --
 -- অ্যাডমিন ইউজার/পাসওয়ার্ড ডাটাবেজে নেই — config.php (ADMIN_USERNAME / ADMIN_PASSWORD) এ আছে।
 -- সব টেবিলের subdomain_id = 0 (একটাই স্টোর)।
 -- ====================================================================
+
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS `system_settings`;
+DROP TABLE IF EXISTS `users`;
+DROP TABLE IF EXISTS `product_categories`;
+DROP TABLE IF EXISTS `products`;
+DROP TABLE IF EXISTS `product_plans`;
+DROP TABLE IF EXISTS `stock_keys`;
+DROP TABLE IF EXISTS `user_custom_prices`;
+DROP TABLE IF EXISTS `user_allowed_products`;
+DROP TABLE IF EXISTS `licenses`;
+DROP TABLE IF EXISTS `transactions`;
+DROP TABLE IF EXISTS `gateway_transactions`;
+DROP TABLE IF EXISTS `payment_methods`;
+DROP TABLE IF EXISTS `live_purchase_feed`;
+DROP TABLE IF EXISTS `coupons`;
+DROP TABLE IF EXISTS `coupon_usages`;
+DROP TABLE IF EXISTS `banners`;
+DROP TABLE IF EXISTS `custom_popups`;
+DROP TABLE IF EXISTS `system_notifications`;
+DROP TABLE IF EXISTS `referral_settings`;
+DROP TABLE IF EXISTS `spin_segments`;
+DROP TABLE IF EXISTS `user_spin_offers`;
+DROP TABLE IF EXISTS `deposit_bonuses`;
+DROP TABLE IF EXISTS `reset_logs`;
+DROP TABLE IF EXISTS `activity_logs`;
+DROP TABLE IF EXISTS `settings`;
+DROP TABLE IF EXISTS `categories`;
+DROP TABLE IF EXISTS `orders`;
+DROP TABLE IF EXISTS `deposits`;
+DROP TABLE IF EXISTS `announcements`;
+
 
 -- ---------------------------------------------------------------- settings
 CREATE TABLE IF NOT EXISTS `system_settings` (
