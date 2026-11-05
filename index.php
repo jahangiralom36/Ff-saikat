@@ -355,6 +355,21 @@ if (!function_exists('vpResetApiConfig')) {
             }
         } catch (Throwable $e) {}
         $cfg['api_key'] = trim($cfg['api_key']);
+        // আলাদা reset key না থাকলে Key Manager এর একই API key/URL ব্যবহার হবে (দুটোই keymanager.shop/api.php)
+        if ($cfg['api_key'] === '') {
+            try {
+                $st2 = $pdo->query("SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('km_api_url', 'km_api_key')");
+                $km = $st2 ? $st2->fetchAll(PDO::FETCH_KEY_PAIR) : [];
+                if (!empty($km['km_api_key'])) {
+                    $cfg['api_key'] = trim((string)$km['km_api_key']);
+                    $u = trim((string)($km['km_api_url'] ?? ''));
+                    if ($u !== '') {
+                        if (!preg_match('#^https?://#i', $u)) $u = 'https://' . $u;
+                        $cfg['api_url'] = (stripos($u, '.php') === false) ? rtrim($u, '/') . '/api.php' : $u;
+                    }
+                }
+            } catch (Throwable $e) {}
+        }
         return $cfg;
     }
 }
@@ -929,6 +944,16 @@ try {
 // ====================================================================
 // 7. KEY MANAGER REST HANDLER
 // ====================================================================
+if (!function_exists('vpKmLogError')) {
+    // Key Manager থেকে কি আনতে ব্যর্থ হলে আসল কারণটা admin এর Key Manager ট্যাবে দেখা যাবে (ইউজার শুধু "Out of stock" দেখে)
+    function vpKmLogError(string $msg): void {
+        global $pdo;
+        try {
+            $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('km_last_error', ?), ('km_last_error_time', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
+                ->execute([mb_substr($msg, 0, 250), date('Y-m-d H:i:s')]);
+        } catch (Throwable $e) {}
+    }
+}
 if (!function_exists('generateFromExternalProvider')) {
     function generateFromExternalProvider($apiPlanId, $quantity = 1) {
         global $pdo, $settings;
@@ -943,11 +968,11 @@ if (!function_exists('generateFromExternalProvider')) {
             return ['status' => 'error', 'message' => 'Out of stock! This product is currently unavailable.'];
         }
 
+        if (!preg_match('#^https?://#i', $kmUrl)) $kmUrl = 'https://' . $kmUrl;
         $targetEndpoint = rtrim($kmUrl, '/');
         $params = [
             'action'     => 'generate_key',
             'plan_id'    => $planIdInt,
-            'product_id' => $planIdInt,
             'quantity'   => $qtyInt,
             'api_key'    => $kmKey
         ];
@@ -969,6 +994,8 @@ if (!function_exists('generateFromExternalProvider')) {
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => http_build_query($params),
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 4,
             CURLOPT_TIMEOUT        => 30,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
@@ -981,11 +1008,13 @@ if (!function_exists('generateFromExternalProvider')) {
         curl_close($ch);
 
         if ($curlErr) {
+            vpKmLogError('Connection: ' . $curlErr);
             return ['status' => 'error', 'message' => 'Key Manager Connection Timeout: ' . $curlErr];
         }
 
-        $data = json_decode($body ?: '', true);
+        $data = json_decode(ltrim($body ?: '', "\xEF\xBB\xBF \t\r\n"), true);
         if (!is_array($data)) {
+            vpKmLogError('Key Manager did not return JSON (HTTP ' . $httpCode . '): ' . mb_substr(trim(strip_tags((string)$body)), 0, 120));
             return ['status' => 'error', 'message' => 'Out of stock! This product is currently unavailable.'];
         }
 
@@ -1015,6 +1044,7 @@ if (!function_exists('generateFromExternalProvider')) {
         }
 
         $errorMsg = $data['message'] ?? ($data['error'] ?? 'Out of stock! This product is currently unavailable.');
+        vpKmLogError('plan_id ' . $planIdInt . ' x' . $qtyInt . ': ' . (is_string($errorMsg) ? $errorMsg : json_encode($errorMsg)));
         return ['status' => 'error', 'message' => $errorMsg];
     }
 }
@@ -3489,7 +3519,7 @@ overflow: hidden; }
                 <span class="vp-divider" aria-hidden="true"></span>
                 <div class="vp-brand-text">
                     <h1 class="vp-store-name"><?= htmlspecialchars($storeTitleName) ?></h1>
-                    <span class="vp-portal-label"><?= $isLoggedIn ? strtoupper($userRole) . ' PORTAL' : 'OFFICIAL STORE' ?></span>
+                    <span class="vp-portal-label"><?= $isLoggedIn ? strtoupper($userRole) : 'OFFICIAL STORE' ?></span>
                 </div>
             </div>
 

@@ -346,22 +346,7 @@ function admin_km_cached_balance(PDO $pdo): string {
     $kmKey = trim($settings['km_api_key'] ?? '');
     if (empty($kmUrl) || empty($kmKey)) return '$0.00 USD';
 
-    $target = rtrim($kmUrl, '/');
-    if (stripos($target, '.php') === false) $target .= '/api.php';
-
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL            => $target . '?action=balance&api_key=' . urlencode($kmKey),
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 3,
-        CURLOPT_CONNECTTIMEOUT => 2,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false
-    ]);
-    $body = curl_exec($ch);
-    curl_close($ch);
-
-    $data = json_decode($body ?: '', true);
+    $data = admin_km_request($kmUrl, $kmKey, 'balance', [], 'GET', 4);
     if ($data && isset($data['status']) && $data['status'] === 'success') {
         $formatted = '$' . number_format((float)($data['balance'] ?? 0), 2) . ' USD';
         try {
@@ -548,114 +533,261 @@ function syncStackedPricesForAllUsers(PDO $pdo, ?string $onlyRole = null) {
 // ====================================================================
 // KEY MANAGER API HANDLER FOR SUB-ADMIN (FAST TIMEOUT)
 // ====================================================================
-function admin_km_request(string $apiUrl, string $apiKey, string $endpoint, array $params = [], string $method = 'POST'): array {
-    $apiUrl = trim($apiUrl);
-    $apiKey = trim($apiKey);
-    if (empty($apiUrl) || empty($apiKey)) {
-        return ['status' => 'error', 'message' => 'API URL and API Key are required!'];
-    }
-
-    $isPhpFile = (stripos($apiUrl, '.php') !== false);
-    if ($isPhpFile) {
-        $url = $apiUrl;
-        $params['action'] = $endpoint;
-    } else {
-        $url = rtrim($apiUrl, '/') . '/' . ltrim($endpoint, '/');
-    }
-
-    $params['api_key'] = $apiKey;
-
-    $ch = curl_init();
-    if (strtoupper($method) === 'GET') {
-        $query = http_build_query($params);
-        $sep = (strpos($url, '?') !== false) ? '&' : '?';
-        curl_setopt($ch, CURLOPT_URL, $url . $sep . $query);
-    } else {
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
-    }
-
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 12);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 4);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-    $res = curl_exec($ch);
-    $err = curl_error($ch);
-    curl_close($ch);
-
-    if ($err) return ['status' => 'error', 'message' => 'Connection Error: ' . $err];
-    $json = json_decode($res, true);
-    if (!is_array($json)) {
-        if (strtoupper($method) === 'POST' && $isPhpFile) {
-            return admin_km_request($apiUrl, $apiKey, $endpoint, $params, 'GET');
-        }
-        return ['status' => 'error', 'message' => 'Invalid Response from Key Manager'];
-    }
-    return $json;
+// ====================================================================
+// 🔌 KEY MANAGER API — catalog sync (অনেক রকম response format বোঝে + diagnose সুবিধা)
+// ====================================================================
+function km_endpoint(string $apiUrl): string {
+    $u = trim($apiUrl);
+    if ($u === '') return '';
+    if (!preg_match('#^https?://#i', $u)) $u = 'https://' . $u;
+    if (stripos($u, '.php') === false) $u = rtrim($u, '/') . '/api.php';
+    return $u;
 }
 
-function fetchSubadminKmCatalog(array $settings): ?array {
-    $kmUrl = trim($settings['km_api_url'] ?? '');
-    $kmKey = trim($settings['km_api_key'] ?? '');
-    if (empty($kmUrl) || empty($kmKey)) return null;
-
-    $res = admin_km_request($kmUrl, $kmKey, 'products', [], 'GET');
-    if (empty($res) || (isset($res['status']) && $res['status'] === 'error')) {
-        $res = admin_km_request($kmUrl, $kmKey, 'products', [], 'POST');
-    }
-
-    $raw = $res['products'] ?? ($res['data']['products'] ?? ($res['data'] ?? ($res['items'] ?? [])));
-    if (empty($raw) && is_array($res) && isset($res[0])) {
-        $raw = $res;
-    }
-
-    $normalizedPlans = [];
-    if (is_array($raw)) {
-        foreach ($raw as $item) {
-            if (!empty($item['plans']) && is_array($item['plans'])) {
-                $prodName = $item['product_name'] ?? ($item['name'] ?? 'License Product');
-                foreach ($item['plans'] as $pl) {
-                    $normalizedPlans[] = [
-                        'id'            => (int)($pl['plan_id'] ?? ($pl['id'] ?? 0)),
-                        'product_id'    => (int)($item['product_id'] ?? 0),
-                        'product_name'  => $prodName,
-                        'plan_title'    => $pl['validity'] ?? ($pl['plan_title'] ?? '30 Days'),
-                        'price'         => (float)($pl['price'] ?? ($pl['user_price'] ?? 5.00)),
-                        'regular_price' => (float)($pl['regular_price'] ?? ($pl['price'] ?? 5.00)),
-                        'discount'      => (int)($pl['discount_percent'] ?? 0)
-                    ];
-                }
-            } elseif (isset($item['id']) || isset($item['plan_id'])) {
-                $planId = (int)($item['plan_id'] ?? $item['id']);
-                $prodName = $item['product_name'] ?? ($item['name'] ?? 'License Product');
-                $planTitle = $item['validity'] ?? ($item['plan_title'] ?? ($item['name'] ?? 'Plan'));
-                $normalizedPlans[] = [
-                    'id'            => $planId,
-                    'product_id'    => (int)($item['product_id'] ?? 0),
-                    'product_name'  => $prodName,
-                    'plan_title'    => $planTitle,
-                    'price'         => (float)($item['price'] ?? ($item['user_price'] ?? 5.00)),
-                    'regular_price' => (float)($item['regular_price'] ?? ($item['price'] ?? 5.00)),
-                    'discount'      => (int)($item['discount_percent'] ?? 0)
-                ];
-            }
+function km_http(string $url, array $params, string $method, string $apiKey, int $timeout = 12): array {
+    $out = ['http' => 0, 'body' => '', 'json' => null, 'err' => ''];
+    $headers = ['X-API-Token: ' . $apiKey, 'X-API-KEY: ' . $apiKey, 'Accept: application/json', 'User-Agent: KeyManagerStore/2.0'];
+    for ($try = 0; $try < 2; $try++) {
+        $ch = curl_init();
+        if (strtoupper($method) === 'GET') {
+            curl_setopt($ch, CURLOPT_URL, $url . ((strpos($url, '?') !== false) ? '&' : '?') . http_build_query($params));
+        } else {
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
         }
-        return $normalizedPlans;
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 4,
+            CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_SSL_VERIFYPEER => ($try === 0), CURLOPT_SSL_VERIFYHOST => ($try === 0 ? 2 : 0),
+        ]);
+        $body = curl_exec($ch); $errno = curl_errno($ch); $err = curl_error($ch); $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($errno && $try === 0 && in_array($errno, [35, 51, 58, 60, 77, 82, 83], true)) continue; // SSL সমস্যা হলে verify ছাড়া আবার চেষ্টা
+        $out['http'] = $code; $out['err'] = $err; $out['body'] = is_string($body) ? $body : '';
+        break;
+    }
+    $j = json_decode(ltrim($out['body'], "\xEF\xBB\xBF \t\r\n"), true);
+    if (is_array($j)) $out['json'] = $j;
+    return $out;
+}
+
+function admin_km_request(string $apiUrl, string $apiKey, string $endpoint, array $params = [], string $method = 'POST', int $timeout = 12): array {
+    $url = km_endpoint($apiUrl); $apiKey = trim($apiKey);
+    if ($url === '' || $apiKey === '') return ['status' => 'error', 'message' => 'API URL and API Key are required!'];
+    $params['action'] = $endpoint; $params['api_key'] = $apiKey;
+    $r = km_http($url, $params, $method, $apiKey, $timeout);
+    if ($r['json'] === null && strtoupper($method) !== 'GET') $r = km_http($url, $params, 'GET', $apiKey, $timeout);
+    if ($r['json'] === null) {
+        if ($r['err'] !== '') return ['status' => 'error', 'message' => 'Connection Error: ' . $r['err']];
+        if ($r['http'] >= 400) return ['status' => 'error', 'message' => 'Key Manager returned HTTP ' . $r['http']];
+        return ['status' => 'error', 'message' => 'Invalid Response from Key Manager (not JSON). Check the API URL — it must look like https://keymanager.shop/api.php'];
+    }
+    return $r['json'];
+}
+
+function km_val(array $a, array $keys) {
+    foreach ($keys as $k) {
+        if (isset($a[$k]) && !is_array($a[$k]) && trim((string)$a[$k]) !== '') return $a[$k];
     }
     return null;
 }
 
+function km_find_items($j, int $depth = 0): array {
+    if (!is_array($j) || !$j) return [];
+    if (array_keys($j) === range(0, count($j) - 1) && is_array($j[0])) return $j;       // সরাসরি লিস্ট
+    foreach (['products', 'plans', 'data', 'items', 'result', 'results', 'list', 'catalog', 'packages', 'services', 'variants'] as $k) {
+        if (!isset($j[$k]) || !is_array($j[$k]) || !$j[$k]) continue;
+        $v = $j[$k]; $first = reset($v);
+        $isList = (array_keys($v) === range(0, count($v) - 1));
+        if (!$isList && $depth < 3) {                                                    // wrapper object (যেমন data: {products: ...})
+            foreach (['products', 'plans', 'items', 'result', 'results', 'list', 'catalog', 'packages', 'services', 'variants', 'data'] as $ck) {
+                if (isset($v[$ck]) && is_array($v[$ck])) { $r = km_find_items($v, $depth + 1); if ($r) return $r; continue 2; }
+            }
+        }
+        if (is_array($first)) {
+            if (!$isList) {                                                              // id => item map
+                $tmp = [];
+                foreach ($v as $id => $it) {
+                    if (is_array($it) && !isset($it['id']) && !isset($it['plan_id']) && ctype_digit((string)$id)) $it['id'] = (int)$id;
+                    $tmp[] = $it;
+                }
+                return $tmp;
+            }
+            return $v;
+        }
+        if ($depth < 3) { $r = km_find_items($v, $depth + 1); if ($r) return $r; }
+    }
+    return [];
+}
+
+function km_days_from(string $title, $days = null): int {
+    if ($days !== null && is_numeric($days) && (int)$days > 0) return (int)$days;
+    if (preg_match('/(\d+)\s*(hour|hr|day|week|month|year|lifetime)/i', $title, $m)) {
+        $n = max(1, (int)$m[1]); $u = strtolower($m[2]);
+        if ($u === 'hour' || $u === 'hr') return 1;
+        if ($u === 'week') return $n * 7;
+        if ($u === 'month') return $n * 30;
+        if ($u === 'year') return $n * 365;
+        return $n;
+    }
+    if (stripos($title, 'lifetime') !== false) return 3650;
+    return 30;
+}
+
+function km_plan_row(array $pl, $prodName, $prodApi, $key): ?array {
+    $id = km_val($pl, ['plan_id', 'planId', 'variant_id', 'sku_id', 'pid', 'id']);
+    if ($id === null && $key !== null && ctype_digit((string)$key)) $id = $key;
+    if ($id === null || (int)$id <= 0) return null;
+    $pn = km_val($pl, ['product_name', 'productName', 'app_name', 'game', 'api_name', 'product']);
+    if ($pn === null) $pn = $prodName;
+    $nameField = km_val($pl, ['name', 'title']);
+    if ($pn === null) $pn = $nameField;
+    $title = km_val($pl, ['validity', 'plan_title', 'plan_name', 'duration_label', 'duration_text', 'label']);
+    $days  = km_val($pl, ['duration_days', 'validity_days', 'days']);
+    if ($title === null) {
+        $d = km_val($pl, ['duration']);
+        if ($d !== null) $title = is_numeric($d) ? ((int)$d . ' Day' . ((int)$d > 1 ? 's' : '')) : $d;
+    }
+    if ($title === null && $days !== null && is_numeric($days)) $title = (int)$days . ' Day' . ((int)$days > 1 ? 's' : '');
+    if ($title === null && $nameField !== null && $nameField !== $pn) $title = $nameField;
+    if ($title === null && $pn !== null && preg_match('/\d+\s*(hour|hr|day|week|month|year)s?/i', (string)$pn, $m)) $title = $m[0];
+    if ($title === null) $title = 'Plan #' . (int)$id;
+    if ($pn === null || trim((string)$pn) === '') $pn = 'Key Manager Product ' . ($prodApi ?: (int)$id);
+    $price = km_val($pl, ['price', 'user_price', 'sell_price', 'cost', 'wholesale_price', 'amount', 'rate', 'price_usd', 'usd']);
+    return [
+        'id' => (int)$id, 'product_id' => ($prodApi !== null ? (int)$prodApi : 0),
+        'product_name' => trim((string)$pn), 'plan_title' => trim((string)$title),
+        'price' => is_numeric($price) ? (float)$price : null, 'days' => km_days_from((string)$title, $days),
+    ];
+}
+
+function km_normalize_catalog($json): array {
+    $plans = [];
+    $subKeys = ['plans', 'variants', 'packages', 'validities', 'durations', 'options', 'prices', 'tiers', 'skus'];
+    foreach (km_find_items($json) as $it) {
+        if (!is_array($it)) continue;
+        $subs = null;
+        foreach ($subKeys as $sk) { if (!empty($it[$sk]) && is_array($it[$sk])) { $subs = $it[$sk]; break; } }
+        $prodName = km_val($it, ['product_name', 'productName', 'app_name', 'game', 'api_name', 'product', 'name', 'title']);
+        $prodApi  = km_val($it, ['api_id', 'apiId', 'product_id', 'productId']);
+        if ($subs !== null) {
+            if ($prodApi === null) $prodApi = km_val($it, ['id']);
+            foreach ($subs as $k => $pl) {
+                if (!is_array($pl)) continue;
+                $row = km_plan_row($pl, $prodName, $prodApi, $k);
+                if ($row) $plans[] = $row;
+            }
+        } else {
+            $row = km_plan_row($it, null, $prodApi, null);
+            if ($row) $plans[] = $row;
+        }
+    }
+    return $plans;
+}
+
+/** Key Manager থেকে প্ল্যান লিস্ট আনে — একাধিক action নাম চেষ্টা করে, কোনটা কাজ করলো সেটাও বলে */
+function km_fetch_catalog(array $settings): array {
+    $res = ['plans' => [], 'action' => null, 'tried' => [], 'error' => '', 'sample' => ''];
+    $url = km_endpoint((string)($settings['km_api_url'] ?? '')); $key = trim((string)($settings['km_api_key'] ?? ''));
+    if ($url === '' || $key === '') { $res['error'] = 'API URL / API key খালি। আগে Key Manager ট্যাবে সেভ করুন।'; return $res; }
+    $t0 = microtime(true);
+    foreach (['products', 'plans', 'catalog', 'product_list', 'list_products', 'get_products', 'list_plans', 'get_plans', 'packages', 'services'] as $a) {
+        foreach (['GET', 'POST'] as $m) {
+            if (microtime(true) - $t0 > 50) break 2;
+            $r = km_http($url, ['action' => $a, 'api_key' => $key], $m, $key, 10);
+            if ($r['http'] === 0 && $r['err'] !== '') { $res['error'] = 'Connection error: ' . $r['err']; return $res; }
+            $plans = $r['json'] !== null ? km_normalize_catalog($r['json']) : [];
+            $msg = '';
+            if (is_array($r['json'])) $msg = (string)($r['json']['message'] ?? ($r['json']['error'] ?? ''));
+            $res['tried'][] = ['action' => $a, 'method' => $m, 'http' => $r['http'], 'json' => $r['json'] !== null, 'plans' => count($plans),
+                               'note' => mb_substr($msg !== '' ? $msg : preg_replace('/\s+/', ' ', $r['body']), 0, 160)];
+            if ($r['json'] !== null && $res['sample'] === '' && (($r['json']['status'] ?? '') === 'success' || !empty($r['json']['success']))) {
+                $res['sample'] = mb_substr(json_encode($r['json'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT), 0, 2500);
+            }
+            if ($plans) { $res['plans'] = $plans; $res['action'] = $a; return $res; }
+            if ($r['json'] !== null) break;     // JSON এসেছে (ফাঁকা/error) — POST আর লাগবে না, পরের action
+        }
+    }
+    $res['error'] = 'Key Manager থেকে কোনো প্ল্যান লিস্ট পাওয়া যায়নি। "Diagnose" বাটনে দেখুন API কী উত্তর দিচ্ছে।';
+    return $res;
+}
+
+/** প্ল্যান ইমপোর্ট/আপডেট — আপনার নিজের সেট করা সেলিং প্রাইস ভুলে ওভাররাইট করে না */
+function km_sync_plans(PDO $pdo, array $plans, ?array $onlyIds, float $markupPct, bool $updatePrices): array {
+    $mult = 1 + max(0.0, $markupPct) / 100;
+    $r = ['created' => 0, 'updated' => 0, 'products' => 0, 'no_price' => 0, 'skipped' => 0];
+    foreach ($plans as $p) {
+        $extId = (int)$p['id'];
+        if ($onlyIds !== null && !in_array((string)$extId, $onlyIds, true)) continue;
+        $name = trim((string)$p['product_name']);
+        if ($name === '') { $r['skipped']++; continue; }
+        if ($p['price'] === null || (float)$p['price'] <= 0) { $r['no_price']++; continue; }   // দাম ছাড়া প্ল্যান বিক্রি হতে দেওয়া হয় না
+        $cost = round((float)$p['price'], 2); $sell = round($cost * $mult, 2);
+        $apiPid = (int)($p['product_id'] ?? 0); $days = max(1, (int)($p['days'] ?? 30));
+
+        $row = null;
+        if ($apiPid > 0) {
+            $st = $pdo->prepare("SELECT id, km_api_id FROM products WHERE km_api_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1");
+            $st->execute([(string)$apiPid]); $row = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        if (!$row) {
+            $st = $pdo->prepare("SELECT id, km_api_id FROM products WHERE LOWER(TRIM(name)) = LOWER(?) AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1");
+            $st->execute([$name]); $row = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        if ($row) {
+            $prodId = (int)$row['id'];
+            if ($apiPid > 0 && trim((string)$row['km_api_id']) === '') $pdo->prepare("UPDATE products SET km_api_id = ? WHERE id = ?")->execute([(string)$apiPid, $prodId]);
+        } else {
+            $code = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $name));
+            $pdo->prepare("INSERT INTO products (name, code, sort_order, is_active, category, km_api_id) VALUES (?, ?, 0, 1, 'APKMOD', ?)")->execute([$name, $code, $apiPid > 0 ? (string)$apiPid : null]);
+            $prodId = (int)$pdo->lastInsertId(); $r['products']++;
+        }
+
+        $st = $pdo->prepare("SELECT id, user_price, reseller_price FROM product_plans WHERE api_plan_id = ? AND product_id = ? LIMIT 1");
+        $st->execute([$extId, $prodId]); $plan = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$plan) {
+            $st = $pdo->prepare("SELECT id, user_price, reseller_price FROM product_plans WHERE api_plan_id = ? LIMIT 1");
+            $st->execute([$extId]); $plan = $st->fetch(PDO::FETCH_ASSOC);
+        }
+        if (!$plan) {
+            $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, ?, ?, ?, ?, ?, 0.00, 0.00, ?, 0, 0)")
+                ->execute([$prodId, $days, $p['plan_title'], $cost, $sell, $sell, $extId]);
+            $r['created']++;
+        } else {
+            $oldCost = (float)$plan['reseller_price']; $oldSell = (float)$plan['user_price'];
+            $auto = ($oldSell <= 0) || abs($oldSell - round($oldCost * $mult, 2)) < 0.02 || abs($oldSell - round($oldCost * 1.25, 2)) < 0.02;  // আগে অটো বসানো দাম
+            $newSell = ($updatePrices || $auto) ? $sell : $oldSell;
+            $pdo->prepare("UPDATE product_plans SET plan_title = ?, duration_days = ?, reseller_price = ?, user_price = ? WHERE id = ?")->execute([$p['plan_title'], $days, $cost, $newSell, $plan['id']]);
+            if (abs($newSell - $oldSell) >= 0.005) $pdo->prepare("UPDATE product_plans SET regular_price = ? WHERE id = ?")->execute([$newSell, $plan['id']]);
+            $r['updated']++;
+        }
+    }
+    return $r;
+}
+
 if (isset($_GET['action']) && $_GET['action'] === 'fetch_km_catalog') {
     header('Content-Type: application/json');
-    $items = fetchSubadminKmCatalog($settings);
-    if (is_array($items) && !empty($items)) {
-        echo json_encode(['success' => true, 'items' => $items]);
+    $cat = km_fetch_catalog($settings);
+    if (!empty($cat['plans'])) {
+        echo json_encode(['success' => true, 'items' => $cat['plans'], 'source' => $cat['action']], JSON_UNESCAPED_UNICODE);
     } else {
-        $err = empty($settings['km_api_key']) ? 'API Key is empty in Key Manager tab.' : 'Failed to retrieve catalog from Key Manager.';
-        echo json_encode(['success' => false, 'error' => $err]);
+        echo json_encode(['success' => false, 'error' => $cat['error'] ?: 'Failed to retrieve catalog from Key Manager.'], JSON_UNESCAPED_UNICODE);
     }
+    exit;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'km_diagnose') {
+    header('Content-Type: application/json');
+    $bal = admin_km_request($settings['km_api_url'] ?? '', $settings['km_api_key'] ?? '', 'balance', [], 'GET');
+    $cat = km_fetch_catalog($settings);
+    echo json_encode([
+        'url'     => km_endpoint((string)($settings['km_api_url'] ?? '')),
+        'balance' => $bal['status'] ?? 'error', 'balance_msg' => (string)($bal['message'] ?? ''),
+        'found'   => count($cat['plans']), 'action' => $cat['action'], 'error' => $cat['error'],
+        'tried'   => $cat['tried'], 'sample' => $cat['sample'],
+        'preview' => array_slice($cat['plans'], 0, 5),
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
@@ -749,109 +881,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_action'])) {
         }
     }
 
-    if ($act === 'sync_km_products') {
-        $items = fetchSubadminKmCatalog($settings);
-        if (is_array($items) && !empty($items)) {
-            $pdo->beginTransaction();
-            $syncedCount = 0;
-            try {
-                foreach ($items as $p) {
-                    $extId       = (int)$p['id'];
-                    $productName = trim($p['product_name']);
-                    $planTitle   = trim($p['plan_title']);
-                    $basePrice   = (float)$p['price'];
-                    $code        = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $productName)) ;
-
-                    $stmtProd = $pdo->prepare("SELECT id FROM products WHERE name = ? LIMIT 1");
-                    $stmtProd->execute([$productName]);
-                    $prodId = $stmtProd->fetchColumn();
-
-                    if (!$prodId) {
-                        $stmtIns = $pdo->prepare("INSERT INTO products (name, code, sort_order, is_active, category) VALUES (?, ?, 0, 1, 'APKMOD')");
-                        $stmtIns->execute([$productName, $code]);
-                        $prodId = (int)$pdo->lastInsertId();
-                    }
-
-                    $stmtPlan = $pdo->prepare("SELECT id FROM product_plans WHERE api_plan_id = ? AND product_id = ? LIMIT 1");
-                    $stmtPlan->execute([$extId, $prodId]);
-                    $planExists = $stmtPlan->fetchColumn();
-
-                    $resellerPrice = $basePrice;
-                    $userPrice     = round($basePrice * 1.25, 2);
-
-                    if (!$planExists) {
-                        $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, 30, ?, ?, ?, ?, 0.00, 20.00, ?, 0, 0)");
-                        $stmtPlanIns->execute([$prodId, $planTitle, $resellerPrice, $userPrice, $userPrice, $extId]);
-                    } else {
-                        $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, reseller_price = ?, user_price = ?, regular_price = ? WHERE id = ?");
-                        $stmtPlanUp->execute([$planTitle, $resellerPrice, $userPrice, $userPrice, $planExists]);
-                    }
-                    $syncedCount++;
-                }
-                $pdo->commit();
-                $toast = ['type' => 'success', 'msg' => "Synced $syncedCount plans successfully!"];
-            } catch (Throwable $e) {
-                $pdo->rollBack();
-                $toast = ['type' => 'error', 'msg' => 'Sync Error: ' . $e->getMessage()];
-            }
-        } else {
-            $toast = ['type' => 'error', 'msg' => 'Could not fetch catalog. Connect Key Manager API first!'];
-        }
+    if ($act === 'save_km_markup') {
+        $mk = max(0.0, min(500.0, (float)($_POST['km_markup_percent'] ?? 25)));
+        saveSetting($pdo, 'km_markup_percent', (string)$mk);
+        $settings['km_markup_percent'] = (string)$mk;
+        $toast = ['type' => 'success', 'msg' => "Markup saved: selling price = Key Manager cost + {$mk}%"];
     }
 
-    if ($act === 'sync_selected_km_products') {
-        $selectedExtIds = $_POST['selected_api_ids'] ?? [];
-        if (empty($selectedExtIds)) {
-            $toast = ['type' => 'error', 'msg' => 'No plans selected!'];
-        } else {
-            $items = fetchSubadminKmCatalog($settings);
-            if (is_array($items) && !empty($items)) {
-                $pdo->beginTransaction();
-                $syncedCount = 0;
+    if ($act === 'sync_km_products' || $act === 'sync_selected_km_products') {
+        $onlyIds = null;
+        if ($act === 'sync_selected_km_products') {
+            $onlyIds = array_map('strval', (array)($_POST['selected_api_ids'] ?? []));
+            if (!$onlyIds) $toast = ['type' => 'error', 'msg' => 'No plans selected!'];
+        }
+        if ($act === 'sync_km_products' || $onlyIds) {
+            $cat = km_fetch_catalog($settings);
+            if (empty($cat['plans'])) {
+                $toast = ['type' => 'error', 'msg' => ($cat['error'] ?: 'Could not fetch catalog.') . ' (Key Manager ট্যাবে Diagnose বাটন চাপুন)'];
+            } else {
+                $markup = (float)($settings['km_markup_percent'] ?? 25);
                 try {
-                    foreach ($items as $p) {
-                        $extId = (int)$p['id'];
-                        if (!in_array((string)$extId, $selectedExtIds)) continue;
-
-                        $productName = trim($p['product_name']);
-                        $planTitle   = trim($p['plan_title']);
-                        $basePrice   = (float)$p['price'];
-                        $code        = strtolower(preg_replace('/[^a-z0-9_]/i', '_', $productName)) ;
-
-                        $stmtProd = $pdo->prepare("SELECT id FROM products WHERE name = ? LIMIT 1");
-                        $stmtProd->execute([$productName]);
-                        $prodId = $stmtProd->fetchColumn();
-
-                        if (!$prodId) {
-                            $stmtIns = $pdo->prepare("INSERT INTO products (name, code, sort_order, is_active, category) VALUES (?, ?, 0, 1, 'APKMOD')");
-                            $stmtIns->execute([$productName, $code]);
-                            $prodId = (int)$pdo->lastInsertId();
-                        }
-
-                        $stmtPlan = $pdo->prepare("SELECT id FROM product_plans WHERE api_plan_id = ? AND product_id = ? LIMIT 1");
-                        $stmtPlan->execute([$extId, $prodId]);
-                        $planExists = $stmtPlan->fetchColumn();
-
-                        $resellerPrice = $basePrice;
-                        $userPrice     = round($basePrice * 1.25, 2);
-
-                        if (!$planExists) {
-                            $stmtPlanIns = $pdo->prepare("INSERT INTO product_plans (product_id, duration_days, plan_title, reseller_price, user_price, regular_price, discount_percent, reseller_discount_percent, api_plan_id, reward_coins, coin_price) VALUES (?, 30, ?, ?, ?, ?, 0.00, 20.00, ?, 0, 0)");
-                            $stmtPlanIns->execute([$prodId, $planTitle, $resellerPrice, $userPrice, $userPrice, $extId]);
-                        } else {
-                            $stmtPlanUp = $pdo->prepare("UPDATE product_plans SET plan_title = ?, reseller_price = ?, user_price = ?, regular_price = ? WHERE id = ?");
-                            $stmtPlanUp->execute([$planTitle, $resellerPrice, $userPrice, $userPrice, $planExists]);
-                        }
-                        $syncedCount++;
-                    }
+                    $pdo->beginTransaction();
+                    $sr = km_sync_plans($pdo, $cat['plans'], $onlyIds, $markup, !empty($_POST['update_prices']));
                     $pdo->commit();
-                    $toast = ['type' => 'success', 'msg' => "Imported $syncedCount plans!"];
+                    $msg = "Sync done ({$cat['action']}): {$sr['created']} new, {$sr['updated']} updated";
+                    if ($sr['products']) $msg .= ", {$sr['products']} new product(s)";
+                    if ($sr['no_price']) $msg .= ", {$sr['no_price']} skipped (no price from API)";
+                    $toast = ['type' => ($sr['created'] + $sr['updated']) > 0 ? 'success' : 'error', 'msg' => $msg];
                 } catch (Throwable $e) {
-                    $pdo->rollBack();
+                    if ($pdo->inTransaction()) $pdo->rollBack();
                     $toast = ['type' => 'error', 'msg' => 'Sync Error: ' . $e->getMessage()];
                 }
-            } else {
-                $toast = ['type' => 'error', 'msg' => 'Empty catalog received.'];
             }
         }
     }
@@ -3334,6 +3394,34 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                         SAVE &amp; CONNECT KEY MANAGER
                     </button>
                 </form>
+                <!-- 🔧 SYNC SETTINGS + DIAGNOSE -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+                    <form method="POST" class="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-3">
+                        <input type="hidden" name="admin_action" value="save_km_markup">
+                        <input type="hidden" name="active_tab" value="tab-connectkm">
+                        <label class="text-slate-300 block font-bold">Selling price markup (%)</label>
+                        <div class="flex gap-2">
+                            <input type="number" step="0.1" min="0" max="500" name="km_markup_percent" value="<?= htmlspecialchars((string)($settings['km_markup_percent'] ?? '25')) ?>" class="w-full bg-[#030612] border border-slate-800 p-2.5 rounded-xl text-white outline-none">
+                            <button type="submit" class="px-4 rounded-xl btn-cyan text-xs font-bold whitespace-nowrap">Save</button>
+                        </div>
+                        <span class="text-[10px] text-slate-400 font-sans block">Sync-এ নতুন প্ল্যানের দাম = Key Manager cost + এই %. (Cost = Reseller price, Selling = Customer price)</span>
+                    </form>
+                    <div class="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-3">
+                        <form method="POST" class="space-y-2.5">
+                            <input type="hidden" name="admin_action" value="sync_km_products">
+                            <input type="hidden" name="active_tab" value="tab-connectkm">
+                            <label class="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer"><input type="checkbox" name="update_prices" value="1" class="rounded scale-110"> আগে থেকে থাকা প্ল্যানের Selling price-ও নতুন করে বসাও</label>
+                            <button type="submit" class="w-full py-2.5 rounded-xl btn-emerald text-xs font-bold">⟳ SYNC ALL PLANS NOW</button>
+                        </form>
+                        <button type="button" onclick="runKmDiagnose()" class="w-full py-2.5 rounded-xl bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-bold hover:bg-amber-500/25">🩺 DIAGNOSE (API কী উত্তর দিচ্ছে দেখুন)</button>
+                    </div>
+                </div>
+                <?php if (!empty($settings['km_last_error'])): ?>
+                    <div class="p-3 rounded-xl bg-red-950/30 border border-red-500/30 text-red-300 text-[11px] font-sans">
+                        <b>Last key-delivery error</b> (<?= htmlspecialchars($settings['km_last_error_time'] ?? '') ?>): <?= htmlspecialchars($settings['km_last_error']) ?>
+                    </div>
+                <?php endif; ?>
+
 
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
                     <div class="bg-slate-900/80 p-4 rounded-2xl border border-emerald-500/20 flex flex-col justify-between">
@@ -4983,6 +5071,7 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                     <p class="text-center text-blue-300 py-6"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Fetching from Key Manager...</p>
                 </div>
 
+                <label class="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer"><input type="checkbox" name="update_prices" value="1" class="rounded scale-110"> আগের প্ল্যানের Selling price-ও নতুন করে বসাও</label>
                 <div class="grid grid-cols-2 gap-2.5 pt-1">
                     <button type="button" onclick="loadProviderCatalogForSelect()" class="py-2.5 rounded-xl bg-slate-800 text-blue-300 border border-slate-700 font-bold uppercase text-[10px]">
                         RE-FETCH
@@ -4992,6 +5081,17 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- MODAL: KEY MANAGER DIAGNOSE -->
+    <div id="kmDiagModal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="box-panel p-5 w-full max-w-2xl space-y-3 border-amber-500/30 max-h-[90vh] overflow-y-auto text-xs">
+            <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                <h3 class="text-sm font-black text-white flex items-center gap-2"><i class="fa-solid fa-stethoscope text-amber-400"></i> Key Manager Diagnose</h3>
+                <button type="button" onclick="closeModal('kmDiagModal')" class="text-slate-400 hover:text-white p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="kmDiagBody" class="space-y-3 text-slate-300"></div>
         </div>
     </div>
 
@@ -5600,6 +5700,8 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
             loadProviderCatalogForSelect();
         }
 
+        function escKm(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
         function loadProviderCatalogForSelect() {
             const container = document.getElementById('selectSyncItemsContainer');
             container.innerHTML = '<p class="text-center text-blue-300 py-6"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Fetching from Key Manager...</p>';
@@ -5611,33 +5713,51 @@ $panelTitle = !empty($settings['site_name']) ? $settings['site_name'] : 'My Stor
                     container.innerHTML = '';
                     data.items.forEach(p => {
                         const itemTitle = p.product_name + ' (' + p.plan_title + ')';
-                        const price = parseFloat(p.price || 0).toFixed(2);
-                        const bdtPrice = Math.round(parseFloat(price) * currentBdtRate);
-
+                        const hasPrice = p.price !== null && parseFloat(p.price) > 0;
+                        const price = hasPrice ? parseFloat(p.price).toFixed(2) : '0.00';
                         const row = document.createElement('label');
                         row.className = 'flex items-center justify-between p-3 rounded-xl bg-slate-900 hover:bg-slate-800 cursor-pointer text-xs transition';
                         row.innerHTML = `
                             <div class="flex items-center space-x-2.5">
-                                <input type="checkbox" name="selected_api_ids[]" value="${p.id}" class="sync-item-cb rounded text-blue-400 scale-110">
+                                <input type="checkbox" name="selected_api_ids[]" value="${parseInt(p.id)}" class="sync-item-cb rounded text-blue-400 scale-110" ${hasPrice ? '' : 'disabled'}>
                                 <div>
-                                    <strong class="text-white">${itemTitle}</strong>
-                                    <span class="text-[10px] text-slate-400 block font-mono">Plan ID: #${p.id}</span>
+                                    <strong class="text-white">${escKm(itemTitle)}</strong>
+                                    <span class="text-[10px] text-slate-400 block font-mono">Plan ID: #${parseInt(p.id)}${p.days ? ' · ' + parseInt(p.days) + ' day(s)' : ''}</span>
                                 </div>
                             </div>
                             <div class="text-right">
-                                <span class="text-emerald-400 font-bold block">৳${bdtPrice}</span>
-                                <span class="text-[9px] text-slate-400 font-mono">($${price} USD)</span>
-                            </div>
-                        `;
+                                ${hasPrice ? `<span class="text-emerald-400 font-bold block">৳${Math.round(parseFloat(price) * currentBdtRate)}</span><span class="text-[9px] text-slate-400 font-mono">($${price} cost)</span>` : '<span class="text-red-400 font-bold block text-[10px]">no price</span>'}
+                            </div>`;
                         container.appendChild(row);
                     });
                 } else {
-                    container.innerHTML = `<div class="p-4 text-center text-red-400 text-xs">${data.error || 'No items received from Key Manager.'}</div>`;
+                    container.innerHTML = `<div class="p-4 text-center text-red-400 text-xs">${escKm(data.error || 'No items received from Key Manager.')}</div>`;
                 }
             })
             .catch(() => {
                 container.innerHTML = '<div class="p-4 text-center text-red-400 text-xs">Failed to connect to Key Manager API.</div>';
             });
+        }
+
+        function runKmDiagnose() {
+            const box = document.getElementById('kmDiagBody');
+            document.getElementById('kmDiagModal').classList.remove('hidden');
+            box.innerHTML = '<p class="text-center text-amber-300 py-8"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Testing Key Manager (এক মিনিট লাগতে পারে)...</p>';
+            fetch('admin.php?action=km_diagnose').then(r => r.json()).then(d => {
+                const ok = d.balance === 'success';
+                let h = `<div class="grid grid-cols-2 gap-2.5">
+                    <div class="p-3 rounded-xl border ${ok ? 'border-emerald-500/30 bg-emerald-950/20' : 'border-red-500/30 bg-red-950/20'}"><b class="block text-white">1. Connection / API key</b><span>${ok ? '✅ OK — balance পাওয়া গেছে' : '❌ ' + escKm(d.balance_msg || 'Failed')}</span></div>
+                    <div class="p-3 rounded-xl border ${d.found > 0 ? 'border-emerald-500/30 bg-emerald-950/20' : 'border-red-500/30 bg-red-950/20'}"><b class="block text-white">2. Plan list</b><span>${d.found > 0 ? '✅ ' + d.found + ' plan পাওয়া গেছে (action: ' + escKm(d.action) + ')' : '❌ ' + escKm(d.error || 'পাওয়া যায়নি')}</span></div></div>
+                    <div class="text-[11px] text-slate-400 break-all">Endpoint: <span class="text-sky-300">${escKm(d.url)}</span></div>`;
+                if (d.preview && d.preview.length) {
+                    h += '<div><b class="text-white block mb-1">Preview (প্রথম ' + d.preview.length + ' টা)</b>' + d.preview.map(p => `<div class="flex justify-between p-2 rounded-lg bg-slate-900 mb-1"><span>${escKm(p.product_name)} — ${escKm(p.plan_title)} <span class="text-slate-500">#${parseInt(p.id)}</span></span><span class="text-emerald-400">${p.price === null ? 'no price' : '$' + parseFloat(p.price).toFixed(2)}</span></div>`).join('') + '</div>';
+                }
+                if (d.tried && d.tried.length) {
+                    h += '<div><b class="text-white block mb-1">API-কে যা যা জিজ্ঞেস করা হয়েছে</b><div class="max-h-48 overflow-y-auto rounded-xl border border-slate-800">' + d.tried.map(t => `<div class="p-2 border-b border-slate-800 text-[11px]"><b class="${t.plans > 0 ? 'text-emerald-400' : 'text-slate-300'}">${escKm(t.method)} action=${escKm(t.action)}</b> → HTTP ${t.http} ${t.json ? '· JSON' : '· not JSON'} · plans: ${t.plans}<div class="text-slate-500 break-all">${escKm(t.note)}</div></div>`).join('') + '</div></div>';
+                }
+                if (d.sample) h += '<div><b class="text-white block mb-1">API raw response (sample)</b><pre class="p-3 rounded-xl bg-[#030612] border border-slate-800 text-[11px] text-sky-200 overflow-x-auto whitespace-pre-wrap break-all">' + escKm(d.sample) + '</pre><span class="text-[10px] text-slate-500">এই লেখাটা আমাকে পাঠালে আমি parser ঠিক করে দিতে পারব।</span></div>';
+                box.innerHTML = h;
+            }).catch(() => { box.innerHTML = '<p class="text-red-400 text-center py-6">Diagnose চালানো যায়নি।</p>'; });
         }
 
         function toggleAllSyncCB(status) {
