@@ -21,6 +21,400 @@ if ($vpCanGzip) {
 
 require_once __DIR__ . '/config.php';
 
+// ====================================================================
+// 🛠️ AUTO DATABASE UPGRADE — টেবিল/কলাম না থাকলে নিজে যোগ করে (কোনো ডাটা মোছে না)
+// SQL ইম্পোর্ট ছাড়াই পুরোনো ডাটাবেজ নতুন কোডের সাথে মিলিয়ে নেয়। শুধু একবার চলে (schema_ver সেভ থাকে)।
+// ====================================================================
+if (!function_exists('vpEnsureSchema')) {
+    function vpEnsureSchema(PDO $pdo): void {
+        static $done = false;
+        if ($done) return;
+        $done = true;
+        $VER = 938555445;
+        try { $cur = (int)$pdo->query("SELECT setting_value FROM system_settings WHERE setting_key = 'schema_ver' LIMIT 1")->fetchColumn(); }
+        catch (Throwable $e) { $cur = 0; }
+        if ($cur === $VER) return;
+
+        $json = <<<'VPSCHEMAJSON'
+{
+"system_settings": {
+"create": "CREATE TABLE IF NOT EXISTS `system_settings` (\n  `setting_key`   VARCHAR(100) NOT NULL PRIMARY KEY,\n  `setting_value` TEXT NULL\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"setting_key": "VARCHAR(100) NOT NULL PRIMARY KEY",
+"setting_value": "TEXT NULL"
+}
+},
+"users": {
+"create": "CREATE TABLE IF NOT EXISTS `users` (\n  `id`                     INT AUTO_INCREMENT PRIMARY KEY,\n  `username`               VARCHAR(100) NOT NULL,\n  `email`                  VARCHAR(191) NULL,\n  `password`               VARCHAR(255) NOT NULL,\n  `firebase_uid`           VARCHAR(128) NULL,\n  `avatar_url`             VARCHAR(255) NULL,\n  `role`                   VARCHAR(20) NOT NULL DEFAULT 'customer',\n  `status`                 VARCHAR(20) NOT NULL DEFAULT 'active',\n  `balance`                DECIMAL(14,2) NOT NULL DEFAULT 0.00,\n  `profit_balance`         DECIMAL(14,2) NOT NULL DEFAULT 0.00,\n  `parent_granted_balance` DECIMAL(14,2) NOT NULL DEFAULT 0.00,\n  `coins`                  INT NOT NULL DEFAULT 0,\n  `discount_percent`       DECIMAL(5,2) NOT NULL DEFAULT 0.00,\n  `custom_bdt_rate`        DECIMAL(10,2) NOT NULL DEFAULT 0.00,\n  `can_add_fund`           TINYINT(1) NOT NULL DEFAULT 1,\n  `api_enabled`            TINYINT(1) NOT NULL DEFAULT 1,\n  `allowed_products`       TEXT NULL,\n  `min_deposit`            DECIMAL(10,2) NULL,\n  `max_deposit`            DECIMAL(10,2) NULL,\n  `custom_tutorial_link`   VARCHAR(255) NULL,\n  `referral_code`          VARCHAR(20) NULL,\n  `referred_by`            INT NOT NULL DEFAULT 0,\n  `referral_tokens`        INT NOT NULL DEFAULT 0,\n  `spin_count_available`   INT NOT NULL DEFAULT 0,\n  `spin_spend_total`       DECIMAL(14,2) NOT NULL DEFAULT 0.00,\n  `created_by`             INT NOT NULL DEFAULT 0,\n  `created_at`             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_users_name` (`username`),\n  KEY `idx_users_email` (`email`),\n  KEY `idx_users_ref` (`referral_code`),\n  KEY `idx_users_role` (`role`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"username": "VARCHAR(100) NOT NULL",
+"email": "VARCHAR(191) NULL",
+"password": "VARCHAR(255) NOT NULL",
+"firebase_uid": "VARCHAR(128) NULL",
+"avatar_url": "VARCHAR(255) NULL",
+"role": "VARCHAR(20) NOT NULL DEFAULT 'customer'",
+"status": "VARCHAR(20) NOT NULL DEFAULT 'active'",
+"balance": "DECIMAL(14,2) NOT NULL DEFAULT 0.00",
+"profit_balance": "DECIMAL(14,2) NOT NULL DEFAULT 0.00",
+"parent_granted_balance": "DECIMAL(14,2) NOT NULL DEFAULT 0.00",
+"coins": "INT NOT NULL DEFAULT 0",
+"discount_percent": "DECIMAL(5,2) NOT NULL DEFAULT 0.00",
+"custom_bdt_rate": "DECIMAL(10,2) NOT NULL DEFAULT 0.00",
+"can_add_fund": "TINYINT(1) NOT NULL DEFAULT 1",
+"api_enabled": "TINYINT(1) NOT NULL DEFAULT 1",
+"allowed_products": "TEXT NULL",
+"min_deposit": "DECIMAL(10,2) NULL",
+"max_deposit": "DECIMAL(10,2) NULL",
+"custom_tutorial_link": "VARCHAR(255) NULL",
+"referral_code": "VARCHAR(20) NULL",
+"referred_by": "INT NOT NULL DEFAULT 0",
+"referral_tokens": "INT NOT NULL DEFAULT 0",
+"spin_count_available": "INT NOT NULL DEFAULT 0",
+"spin_spend_total": "DECIMAL(14,2) NOT NULL DEFAULT 0.00",
+"created_by": "INT NOT NULL DEFAULT 0",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"product_categories": {
+"create": "CREATE TABLE IF NOT EXISTS `product_categories` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `name`         VARCHAR(100) NOT NULL,\n  `sort_order`   INT NOT NULL DEFAULT 0,\n  `is_active`    TINYINT(1) NOT NULL DEFAULT 1\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"name": "VARCHAR(100) NOT NULL",
+"sort_order": "INT NOT NULL DEFAULT 0",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1"
+}
+},
+"products": {
+"create": "CREATE TABLE IF NOT EXISTS `products` (\n  `id`               INT AUTO_INCREMENT PRIMARY KEY,\n  `name`             VARCHAR(191) NOT NULL,\n  `code`             VARCHAR(100) NULL,\n  `category`         VARCHAR(100) NOT NULL DEFAULT 'APKMOD',\n  `tags`             VARCHAR(255) NULL,\n  `description`      TEXT NULL,\n  `image_url`        VARCHAR(255) NULL,\n  `logo_url`         VARCHAR(255) NULL,\n  `banner_url`       VARCHAR(255) NULL,\n  `download_link`    VARCHAR(255) NULL,\n  `setup_link`       VARCHAR(255) NULL,\n  `app_download_url` VARCHAR(255) NULL,\n  `km_api_id`        VARCHAR(100) NULL,\n  `sort_order`       INT NOT NULL DEFAULT 0,\n  `is_pinned`        TINYINT(1) NOT NULL DEFAULT 0,\n  `is_active`        TINYINT(1) NOT NULL DEFAULT 1,\n  `is_deleted`       TINYINT(1) NOT NULL DEFAULT 0,\n  `status`           VARCHAR(20) NOT NULL DEFAULT 'active',\n  `is_maintenance`   TINYINT(1) NOT NULL DEFAULT 0,\n  `maintenance_msg`  TEXT NULL,\n  `reset_enabled`    TINYINT(1) NOT NULL DEFAULT 0,\n  `created_at`       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_prod_state` (`is_active`,`is_maintenance`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"name": "VARCHAR(191) NOT NULL",
+"code": "VARCHAR(100) NULL",
+"category": "VARCHAR(100) NOT NULL DEFAULT 'APKMOD'",
+"tags": "VARCHAR(255) NULL",
+"description": "TEXT NULL",
+"image_url": "VARCHAR(255) NULL",
+"logo_url": "VARCHAR(255) NULL",
+"banner_url": "VARCHAR(255) NULL",
+"download_link": "VARCHAR(255) NULL",
+"setup_link": "VARCHAR(255) NULL",
+"app_download_url": "VARCHAR(255) NULL",
+"km_api_id": "VARCHAR(100) NULL",
+"sort_order": "INT NOT NULL DEFAULT 0",
+"is_pinned": "TINYINT(1) NOT NULL DEFAULT 0",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1",
+"is_deleted": "TINYINT(1) NOT NULL DEFAULT 0",
+"status": "VARCHAR(20) NOT NULL DEFAULT 'active'",
+"is_maintenance": "TINYINT(1) NOT NULL DEFAULT 0",
+"maintenance_msg": "TEXT NULL",
+"reset_enabled": "TINYINT(1) NOT NULL DEFAULT 0",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"product_plans": {
+"create": "CREATE TABLE IF NOT EXISTS `product_plans` (\n  `id`                        INT AUTO_INCREMENT PRIMARY KEY,\n  `product_id`                INT NOT NULL,\n  `plan_title`                VARCHAR(150) NOT NULL,\n  `validity`                  VARCHAR(100) NULL,\n  `duration_days`             INT NOT NULL DEFAULT 1,\n  `duration_unit`             VARCHAR(20) NOT NULL DEFAULT 'days',\n  `duration_value`            INT NOT NULL DEFAULT 1,\n  `price`                     DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `regular_price`             DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `user_price`                DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `reseller_price`            DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `discount_percent`          DECIMAL(5,2) NOT NULL DEFAULT 0.00,\n  `api_plan_id`               INT NOT NULL DEFAULT 0,\n  `reseller_discount_percent` DECIMAL(5,2) NOT NULL DEFAULT 0.00,\n  `reward_coins`              INT NOT NULL DEFAULT 0,\n  `coin_price`                INT NOT NULL DEFAULT 0,\n  `is_active`                 TINYINT(1) NOT NULL DEFAULT 1,\n  `is_deleted`                TINYINT(1) NOT NULL DEFAULT 0,\n  `created_at`                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_plan_product` (`product_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"product_id": "INT NOT NULL",
+"plan_title": "VARCHAR(150) NOT NULL",
+"validity": "VARCHAR(100) NULL",
+"duration_days": "INT NOT NULL DEFAULT 1",
+"duration_unit": "VARCHAR(20) NOT NULL DEFAULT 'days'",
+"duration_value": "INT NOT NULL DEFAULT 1",
+"price": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"regular_price": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"user_price": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"reseller_price": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"discount_percent": "DECIMAL(5,2) NOT NULL DEFAULT 0.00",
+"api_plan_id": "INT NOT NULL DEFAULT 0",
+"reseller_discount_percent": "DECIMAL(5,2) NOT NULL DEFAULT 0.00",
+"reward_coins": "INT NOT NULL DEFAULT 0",
+"coin_price": "INT NOT NULL DEFAULT 0",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1",
+"is_deleted": "TINYINT(1) NOT NULL DEFAULT 0",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"stock_keys": {
+"create": "CREATE TABLE IF NOT EXISTS `stock_keys` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `product_id`   INT NOT NULL,\n  `plan_id`      INT NOT NULL,\n  `license_key`  VARCHAR(255) NOT NULL,\n  `status`       ENUM('available','used') NOT NULL DEFAULT 'available',\n  `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_stock_pick` (`plan_id`,`status`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"product_id": "INT NOT NULL",
+"plan_id": "INT NOT NULL",
+"license_key": "VARCHAR(255) NOT NULL",
+"status": "ENUM('available','used') NOT NULL DEFAULT 'available'",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"user_custom_prices": {
+"create": "CREATE TABLE IF NOT EXISTS `user_custom_prices` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `user_id`      INT NOT NULL,\n  `plan_id`      INT NOT NULL,\n  `custom_price` DECIMAL(12,2) NOT NULL,\n  UNIQUE KEY `uq_user_plan` (`user_id`,`plan_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"user_id": "INT NOT NULL",
+"plan_id": "INT NOT NULL",
+"custom_price": "DECIMAL(12,2) NOT NULL"
+}
+},
+"user_allowed_products": {
+"create": "CREATE TABLE IF NOT EXISTS `user_allowed_products` (\n  `id`         INT AUTO_INCREMENT PRIMARY KEY,\n  `user_id`    INT NOT NULL,\n  `product_id` INT NOT NULL,\n  UNIQUE KEY `uq_user_prod` (`user_id`,`product_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"user_id": "INT NOT NULL",
+"product_id": "INT NOT NULL"
+}
+},
+"licenses": {
+"create": "CREATE TABLE IF NOT EXISTS `licenses` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `user_id`      INT NOT NULL,\n  `product_id`   INT NULL,\n  `plan_id`      INT NULL,\n  `license_key`  VARCHAR(255) NOT NULL,\n  `validity`     VARCHAR(100) NULL,\n  `price`        DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `source`       VARCHAR(50) NOT NULL DEFAULT 'MAIN',\n  `payment_type` VARCHAR(30) NULL,\n  `status`       VARCHAR(20) NOT NULL DEFAULT 'active',\n  `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `updated_at`   TIMESTAMP NULL DEFAULT NULL,\n  KEY `idx_lic_user` (`user_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"user_id": "INT NOT NULL",
+"product_id": "INT NULL",
+"plan_id": "INT NULL",
+"license_key": "VARCHAR(255) NOT NULL",
+"validity": "VARCHAR(100) NULL",
+"price": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"source": "VARCHAR(50) NOT NULL DEFAULT 'MAIN'",
+"payment_type": "VARCHAR(30) NULL",
+"status": "VARCHAR(20) NOT NULL DEFAULT 'active'",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+"updated_at": "TIMESTAMP NULL DEFAULT NULL"
+}
+},
+"transactions": {
+"create": "CREATE TABLE IF NOT EXISTS `transactions` (\n  `id`            INT AUTO_INCREMENT PRIMARY KEY,\n  `user_id`       INT NOT NULL,\n  `tx_type`       VARCHAR(20) NOT NULL DEFAULT 'deposit',\n  `method`        VARCHAR(50) NOT NULL,\n  `amount`        DECIMAL(12,2) NOT NULL,\n  `bonus_amount`  DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `sender_num`    VARCHAR(100) NULL,\n  `trx_id`        VARCHAR(100) NOT NULL,\n  `order_plan_id` INT NULL,\n  `order_qty`     INT NULL,\n  `order_coupon`  VARCHAR(60) NULL,\n  `status`        ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',\n  `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_trx_user` (`user_id`),\n  KEY `idx_trx_id` (`trx_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"user_id": "INT NOT NULL",
+"tx_type": "VARCHAR(20) NOT NULL DEFAULT 'deposit'",
+"method": "VARCHAR(50) NOT NULL",
+"amount": "DECIMAL(12,2) NOT NULL",
+"bonus_amount": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"sender_num": "VARCHAR(100) NULL",
+"trx_id": "VARCHAR(100) NOT NULL",
+"order_plan_id": "INT NULL",
+"order_qty": "INT NULL",
+"order_coupon": "VARCHAR(60) NULL",
+"status": "ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending'",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"gateway_transactions": {
+"create": "CREATE TABLE IF NOT EXISTS `gateway_transactions` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `trx_id`       VARCHAR(100) NOT NULL,\n  `method`       VARCHAR(50) NULL,\n  `amount`       DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `user_id`      INT NULL,\n  `status`       VARCHAR(20) NOT NULL DEFAULT 'used',\n  `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_gw_trx` (`trx_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"trx_id": "VARCHAR(100) NOT NULL",
+"method": "VARCHAR(50) NULL",
+"amount": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"user_id": "INT NULL",
+"status": "VARCHAR(20) NOT NULL DEFAULT 'used'",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"payment_methods": {
+"create": "CREATE TABLE IF NOT EXISTS `payment_methods` (\n  `id`             INT AUTO_INCREMENT PRIMARY KEY,\n  `method_key`     VARCHAR(50) NOT NULL,\n  `name`           VARCHAR(100) NOT NULL,\n  `account_number` VARCHAR(150) NULL,\n  `account_type`   VARCHAR(50) NULL,\n  `instructions`   TEXT NULL,\n  `logo_url`       VARCHAR(255) NULL,\n  `banner_url`     VARCHAR(255) NULL,\n  `qr_image_url`   VARCHAR(255) NULL,\n  `is_active`      TINYINT(1) NOT NULL DEFAULT 1,\n  `allow_add_fund` TINYINT(1) NOT NULL DEFAULT 1,\n  `allow_checkout` TINYINT(1) NOT NULL DEFAULT 1,\n  `sort_order`     INT NOT NULL DEFAULT 0\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"method_key": "VARCHAR(50) NOT NULL",
+"name": "VARCHAR(100) NOT NULL",
+"account_number": "VARCHAR(150) NULL",
+"account_type": "VARCHAR(50) NULL",
+"instructions": "TEXT NULL",
+"logo_url": "VARCHAR(255) NULL",
+"banner_url": "VARCHAR(255) NULL",
+"qr_image_url": "VARCHAR(255) NULL",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1",
+"allow_add_fund": "TINYINT(1) NOT NULL DEFAULT 1",
+"allow_checkout": "TINYINT(1) NOT NULL DEFAULT 1",
+"sort_order": "INT NOT NULL DEFAULT 0"
+}
+},
+"live_purchase_feed": {
+"create": "CREATE TABLE IF NOT EXISTS `live_purchase_feed` (\n  `id`              INT AUTO_INCREMENT PRIMARY KEY,\n  `masked_username` VARCHAR(100) NULL,\n  `product_name`    VARCHAR(191) NULL,\n  `amount_bdt`      DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `created_at`      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"masked_username": "VARCHAR(100) NULL",
+"product_name": "VARCHAR(191) NULL",
+"amount_bdt": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"coupons": {
+"create": "CREATE TABLE IF NOT EXISTS `coupons` (\n  `id`              INT AUTO_INCREMENT PRIMARY KEY,\n  `code`            VARCHAR(60) NOT NULL,\n  `title`           VARCHAR(150) NULL,\n  `discount_type`   VARCHAR(20) NOT NULL DEFAULT 'percent',\n  `discount_value`  DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `max_discount`    DECIMAL(12,2) NULL,\n  `min_spend`       DECIMAL(12,2) NULL,\n  `target_type`     VARCHAR(30) NOT NULL DEFAULT 'all',\n  `product_ids`     TEXT NULL,\n  `user_role`       VARCHAR(20) NOT NULL DEFAULT 'all',\n  `max_uses`        INT NOT NULL DEFAULT 0,\n  `per_user_limit`  INT NOT NULL DEFAULT 0,\n  `used_count`      INT NOT NULL DEFAULT 0,\n  `starts_at`       DATETIME NULL,\n  `expires_at`      DATETIME NULL,\n  `expiry_date`     DATETIME NULL,\n  `is_active`       TINYINT(1) NOT NULL DEFAULT 1,\n  `created_at`      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_coupon_code` (`code`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"code": "VARCHAR(60) NOT NULL",
+"title": "VARCHAR(150) NULL",
+"discount_type": "VARCHAR(20) NOT NULL DEFAULT 'percent'",
+"discount_value": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"max_discount": "DECIMAL(12,2) NULL",
+"min_spend": "DECIMAL(12,2) NULL",
+"target_type": "VARCHAR(30) NOT NULL DEFAULT 'all'",
+"product_ids": "TEXT NULL",
+"user_role": "VARCHAR(20) NOT NULL DEFAULT 'all'",
+"max_uses": "INT NOT NULL DEFAULT 0",
+"per_user_limit": "INT NOT NULL DEFAULT 0",
+"used_count": "INT NOT NULL DEFAULT 0",
+"starts_at": "DATETIME NULL",
+"expires_at": "DATETIME NULL",
+"expiry_date": "DATETIME NULL",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"coupon_usages": {
+"create": "CREATE TABLE IF NOT EXISTS `coupon_usages` (\n  `id`              INT AUTO_INCREMENT PRIMARY KEY,\n  `coupon_id`       INT NOT NULL,\n  `user_id`         INT NOT NULL,\n  `product_id`      INT NULL,\n  `discount_bdt`    DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `order_total_bdt` DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `created_at`      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_cu_coupon` (`coupon_id`,`user_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"coupon_id": "INT NOT NULL",
+"user_id": "INT NOT NULL",
+"product_id": "INT NULL",
+"discount_bdt": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"order_total_bdt": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"banners": {
+"create": "CREATE TABLE IF NOT EXISTS `banners` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `image_url`    VARCHAR(255) NOT NULL,\n  `target_link`  VARCHAR(255) NULL,\n  `title`        VARCHAR(150) NULL,\n  `sort_order`   INT NOT NULL DEFAULT 0,\n  `is_active`    TINYINT(1) NOT NULL DEFAULT 1,\n  `status`       VARCHAR(20) NULL DEFAULT 'active'\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"image_url": "VARCHAR(255) NOT NULL",
+"target_link": "VARCHAR(255) NULL",
+"title": "VARCHAR(150) NULL",
+"sort_order": "INT NOT NULL DEFAULT 0",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1",
+"status": "VARCHAR(20) NULL DEFAULT 'active'"
+}
+},
+"custom_popups": {
+"create": "CREATE TABLE IF NOT EXISTS `custom_popups` (\n  `id`                    INT AUTO_INCREMENT PRIMARY KEY,\n  `title`                 VARCHAR(150) NULL,\n  `message`               TEXT NULL,\n  `image_url`             VARCHAR(255) NULL,\n  `link_url`              VARCHAR(255) NULL,\n  `link_text`             VARCHAR(100) NULL,\n  `show_once_per_session` TINYINT(1) NOT NULL DEFAULT 1,\n  `sort_order`            INT NOT NULL DEFAULT 0,\n  `is_active`             TINYINT(1) NOT NULL DEFAULT 1\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"title": "VARCHAR(150) NULL",
+"message": "TEXT NULL",
+"image_url": "VARCHAR(255) NULL",
+"link_url": "VARCHAR(255) NULL",
+"link_text": "VARCHAR(100) NULL",
+"show_once_per_session": "TINYINT(1) NOT NULL DEFAULT 1",
+"sort_order": "INT NOT NULL DEFAULT 0",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1"
+}
+},
+"system_notifications": {
+"create": "CREATE TABLE IF NOT EXISTS `system_notifications` (\n  `id`             INT AUTO_INCREMENT PRIMARY KEY,\n  `target_type`    VARCHAR(20) NOT NULL DEFAULT 'all',\n  `target_user_id` INT NULL,\n  `title`          VARCHAR(191) NOT NULL,\n  `message`        TEXT NULL,\n  `scope`          VARCHAR(20) NOT NULL DEFAULT 'sub_only',\n  `created_at`     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"target_type": "VARCHAR(20) NOT NULL DEFAULT 'all'",
+"target_user_id": "INT NULL",
+"title": "VARCHAR(191) NOT NULL",
+"message": "TEXT NULL",
+"scope": "VARCHAR(20) NOT NULL DEFAULT 'sub_only'",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"referral_settings": {
+"create": "CREATE TABLE IF NOT EXISTS `referral_settings` (\n  `id`                 INT PRIMARY KEY,\n  `token_per_referral` INT NOT NULL DEFAULT 10,\n  `referrer_bonus_bdt` DECIMAL(10,2) NOT NULL DEFAULT 0.00,\n  `is_active`          TINYINT(1) NOT NULL DEFAULT 1\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT PRIMARY KEY",
+"token_per_referral": "INT NOT NULL DEFAULT 10",
+"referrer_bonus_bdt": "DECIMAL(10,2) NOT NULL DEFAULT 0.00",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1"
+}
+},
+"spin_segments": {
+"create": "CREATE TABLE IF NOT EXISTS `spin_segments` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `title`        VARCHAR(100) NOT NULL,\n  `spend_target` DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `bonus_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `probability`  DECIMAL(6,2) NOT NULL DEFAULT 10.00,\n  `color`        VARCHAR(20) NULL,\n  `sort_order`   INT NOT NULL DEFAULT 0,\n  `is_active`    TINYINT(1) NOT NULL DEFAULT 1\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"title": "VARCHAR(100) NOT NULL",
+"spend_target": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"bonus_amount": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"probability": "DECIMAL(6,2) NOT NULL DEFAULT 10.00",
+"color": "VARCHAR(20) NULL",
+"sort_order": "INT NOT NULL DEFAULT 0",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1"
+}
+},
+"user_spin_offers": {
+"create": "CREATE TABLE IF NOT EXISTS `user_spin_offers` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `user_id`      INT NOT NULL,\n  `segment_id`   INT NULL,\n  `title`        VARCHAR(100) NULL,\n  `bonus_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `spend_target` DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `status`       VARCHAR(20) NOT NULL DEFAULT 'active',\n  `created_at`   DATETIME NULL,\n  `expires_at`   DATETIME NULL,\n  KEY `idx_uso_user` (`user_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"user_id": "INT NOT NULL",
+"segment_id": "INT NULL",
+"title": "VARCHAR(100) NULL",
+"bonus_amount": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"spend_target": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"status": "VARCHAR(20) NOT NULL DEFAULT 'active'",
+"created_at": "DATETIME NULL",
+"expires_at": "DATETIME NULL"
+}
+},
+"deposit_bonuses": {
+"create": "CREATE TABLE IF NOT EXISTS `deposit_bonuses` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `title`        VARCHAR(100) NULL,\n  `min_deposit`  DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `bonus_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,\n  `bonus_type`   VARCHAR(20) NOT NULL DEFAULT 'fixed',\n  `claim_limit`  INT NOT NULL DEFAULT 0,\n  `sort_order`   INT NOT NULL DEFAULT 0,\n  `is_active`    TINYINT(1) NOT NULL DEFAULT 1\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"title": "VARCHAR(100) NULL",
+"min_deposit": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"bonus_amount": "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+"bonus_type": "VARCHAR(20) NOT NULL DEFAULT 'fixed'",
+"claim_limit": "INT NOT NULL DEFAULT 0",
+"sort_order": "INT NOT NULL DEFAULT 0",
+"is_active": "TINYINT(1) NOT NULL DEFAULT 1"
+}
+},
+"reset_logs": {
+"create": "CREATE TABLE IF NOT EXISTS `reset_logs` (\n  `id`           INT AUTO_INCREMENT PRIMARY KEY,\n  `user_id`      INT NOT NULL,\n  `license_key`  VARCHAR(255) NULL,\n  `product_name` VARCHAR(191) NULL,\n  `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  KEY `idx_reset_user` (`user_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"user_id": "INT NOT NULL",
+"license_key": "VARCHAR(255) NULL",
+"product_name": "VARCHAR(191) NULL",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+},
+"activity_logs": {
+"create": "CREATE TABLE IF NOT EXISTS `activity_logs` (\n  `id`         INT AUTO_INCREMENT PRIMARY KEY,\n  `user_id`    INT NULL,\n  `username`   VARCHAR(100) NULL,\n  `action`     VARCHAR(100) NOT NULL,\n  `details`    TEXT NULL,\n  `ip_address` VARCHAR(45) NULL,\n  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+"cols": {
+"id": "INT AUTO_INCREMENT PRIMARY KEY",
+"user_id": "INT NULL",
+"username": "VARCHAR(100) NULL",
+"action": "VARCHAR(100) NOT NULL",
+"details": "TEXT NULL",
+"ip_address": "VARCHAR(45) NULL",
+"created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+}
+}
+}
+VPSCHEMAJSON;
+        $schema = json_decode($json, true);
+        if (!is_array($schema)) return;
+
+        foreach ($schema as $t => $def) {                      // ১) যে টেবিল নেই সেগুলো তৈরি
+            try { $pdo->exec($def['create']); } catch (Throwable $e) {}
+        }
+        $have = [];
+        try {
+            foreach ($pdo->query("SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()") as $r) {
+                $have[strtolower((string)$r['TABLE_NAME'])][strtolower((string)$r['COLUMN_NAME'])] = 1;
+            }
+        } catch (Throwable $e) {}
+        foreach ($schema as $t => $def) {                      // ২) যে কলাম নেই সেগুলো যোগ
+            foreach ($def['cols'] as $c => $ddl) {
+                if (isset($have[strtolower($t)][strtolower($c)])) continue;
+                if (stripos($ddl, 'PRIMARY KEY') !== false) continue;
+                try { $pdo->exec("ALTER TABLE `$t` ADD COLUMN `$c` $ddl"); $have[strtolower($t)][strtolower($c)] = 1; } catch (Throwable $e) {}
+            }
+        }
+        // ৩) পুরোনো সংস্করণ থেকে ডাটা মিলিয়ে নেওয়া
+        try { if (isset($have['product_plans']['cost_price'])) $pdo->exec("UPDATE product_plans SET reseller_price = cost_price WHERE (reseller_price IS NULL OR reseller_price = 0) AND cost_price > 0"); } catch (Throwable $e) {}
+        try { if (isset($have['users']['password_hash'])) $pdo->exec("UPDATE users SET password = password_hash WHERE (password IS NULL OR password = '') AND password_hash IS NOT NULL"); } catch (Throwable $e) {}
+        try { $pdo->exec("UPDATE users SET role = 'customer' WHERE role = 'user' OR role IS NULL OR role = ''"); } catch (Throwable $e) {}
+        try {
+            $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('schema_ver', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")->execute([(string)$VER]);
+        } catch (Throwable $e) {}
+    }
+}
+vpEnsureSchema($pdo);
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
